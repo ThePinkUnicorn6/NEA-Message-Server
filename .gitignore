@@ -1,0 +1,57 @@
+obj/nea server test.csproj.nuget.dgspec.json
+obj/nea server test.csproj.nuget.g.props
+obj/nea server test.csproj.nuget.g.targets
+obj/project.assets.json
+obj/project.nuget.cache
+obj/Debug/net7.0/.NETCoreApp,Version=v7.0.AssemblyAttributes.cs
+obj/Debug/net7.0/apphost
+obj/Debug/net7.0/nea server test.AssemblyInfo.cs
+obj/Debug/net7.0/nea server test.AssemblyInfoInputs.cache
+obj/Debug/net7.0/nea server test.assets.cache
+obj/Debug/net7.0/nea server test.csproj.AssemblyReference.cache
+obj/Debug/net7.0/nea server test.csproj.CopyComplete
+obj/Debug/net7.0/nea server test.csproj.CoreCompileInputs.cache
+obj/Debug/net7.0/nea server test.csproj.FileListAbsolute.txt
+obj/Debug/net7.0/nea server test.dll
+obj/Debug/net7.0/nea server test.GeneratedMSBuildEditorConfig.editorconfig
+obj/Debug/net7.0/nea server test.genruntimeconfig.cache
+obj/Debug/net7.0/nea server test.GlobalUsings.g.cs
+obj/Debug/net7.0/nea server test.pdb
+obj/Debug/net7.0/ref/nea server test.dll
+obj/Debug/net7.0/refint/nea server test.dll
+bin/Debug/net7.0/EntityFramework.dll
+bin/Debug/net7.0/EntityFramework.SqlServer.dll
+bin/Debug/net7.0/Microsoft.Win32.SystemEvents.dll
+bin/Debug/net7.0/nea server test
+bin/Debug/net7.0/nea server test.deps.json
+bin/Debug/net7.0/nea server test.dll
+bin/Debug/net7.0/nea server test.pdb
+bin/Debug/net7.0/nea server test.runtimeconfig.json
+bin/Debug/net7.0/Newtonsoft.Json.dll
+bin/Debug/net7.0/System.CodeDom.dll
+bin/Debug/net7.0/System.Configuration.ConfigurationManager.dll
+bin/Debug/net7.0/System.Data.SqlClient.dll
+bin/Debug/net7.0/System.Data.SQLite.dll
+bin/Debug/net7.0/System.Data.SQLite.EF6.dll
+bin/Debug/net7.0/System.Drawing.Common.dll
+bin/Debug/net7.0/System.Security.Cryptography.ProtectedData.dll
+bin/Debug/net7.0/System.Security.Permissions.dll
+bin/Debug/net7.0/System.Windows.Extensions.dll
+bin/Debug/net7.0/runtimes/linux-x64/native/SQLite.Interop.dll
+bin/Debug/net7.0/runtimes/osx-x64/native/SQLite.Interop.dll
+bin/Debug/net7.0/runtimes/unix/lib/netcoreapp2.1/System.Data.SqlClient.dll
+bin/Debug/net7.0/runtimes/unix/lib/netcoreapp3.0/System.Drawing.Common.dll
+bin/Debug/net7.0/runtimes/win/lib/netcoreapp2.1/System.Data.SqlClient.dll
+bin/Debug/net7.0/runtimes/win/lib/netcoreapp3.0/Microsoft.Win32.SystemEvents.dll
+bin/Debug/net7.0/runtimes/win/lib/netcoreapp3.0/System.Drawing.Common.dll
+bin/Debug/net7.0/runtimes/win/lib/netcoreapp3.0/System.Windows.Extensions.dll
+bin/Debug/net7.0/runtimes/win/lib/netstandard2.0/System.Security.Cryptography.ProtectedData.dll
+bin/Debug/net7.0/runtimes/win-arm64/native/sni.dll
+bin/Debug/net7.0/runtimes/win-x64/native/sni.dll
+bin/Debug/net7.0/runtimes/win-x64/native/SQLite.Interop.dll
+bin/Debug/net7.0/runtimes/win-x86/native/sni.dll
+bin/Debug/net7.0/runtimes/win-x86/native/SQLite.Interop.dll
+.fuse_hidden0000168e00000001
+data.db
+.vscode/launch.json
+.vscode/tasks.json
