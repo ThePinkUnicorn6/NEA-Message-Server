@@ -14,7 +14,7 @@ class MessageServer
         const string connectionString = "Data Source=data.db; Version=3; New=True; Compress=True;";
         createDB(connectionString);
         
-        const string url = "http://*:8080/";//sets up http server
+        const string url = "http://localhost:8080/";//sets up http server
         HttpListener listener = new HttpListener();
         listener.Prefixes.Add(url);
         listener.Start(); //starts http server
@@ -28,8 +28,8 @@ class MessageServer
             {
                 case "/api/content/getMessages": getMessages(context, uri, connectionString); break;
                 case "/api/content/sendMessage": sendMessage(context, uri, connectionString); break;
-                case "/api/groups/createChat": createChat(context, uri, 0, connectionString); break;
-                case "/api/groups/createPrivateChat": createChat(context, uri, 1, connectionString); break;
+                case "/api/groups/createChannel": createChannel(context, uri, 0, connectionString); break;
+                case "/api/groups/createDM": createChannel(context, uri, 1, connectionString); break;
                 case "/api/account/addUser": addUser(context, uri, connectionString); break;
                 case "/api/login": login(context, uri, connectionString); break;
                 default:
@@ -54,35 +54,49 @@ class MessageServer
         {
             con.Open();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblUsers' (
-                'UserID'        CHAR(36) PRIMARY KEY,
+                'UserID'        CHAR(36),
                 'UserName'      VARCHAR(20),
                 'PassHash'      VARCHAR(64),
-                'PublicKey'     TEXT
+                'PublicKey'     TEXT,
+                PRIMARY KEY('UserID')
+            );";
+            cmd.ExecuteNonQuery();
+            cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblChannels' (
+                'ChannelID'     CHAR(36),
+                'ChannelName'   VARCHAR(20),
+                'ChannelType'   INTEGER,
+                'ChanelDesc'    VARCHAR(100),
+                'IsDM'          BOOL,
+                'GuildID'       CHAR(36),
+                PRIMARY KEY('ChannelID')
             );";
             cmd.ExecuteNonQuery();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblMessages' (
-                'ChatID'        CHAR(36),
+                'ChannelID'     CHAR(36),
                 'TimeSent'      INT,
-                'MessageID'	    TEXT,
+                'MessageID'	    CHAR(36),
                 'UserID'	    CHAR(36),
                 'MessageText'	TEXT,
                 FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID'),
+                FOREIGN KEY('ChannelID') REFERENCES 'tblChannels'('ChannelID'),
                 PRIMARY KEY('MessageID')
             );";
             cmd.ExecuteNonQuery();
-            cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblChats' (
-                'ChatID'        CHAR(36),
-                'ChatName'      VARCHAR(20),
-                'IsDM'          BOOL,
-                PRIMARY KEY('ChatID')
-            );";
-            cmd.ExecuteNonQuery();
-            cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblConnections' (
+            cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblGuildConnections' (
                 'UserID'        CHAR(36),
-                'ChatID'        CHAR(36),
+                'GuildID'       CHAR(36),
                 'Admin'         BOOL,
                 FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID'),
-                FOREIGN KEY('ChatID') REFERENCES 'tblChats'('ChatID')
+                FOREIGN KEY('GuildID') REFERENCES 'tblGuilds'('GuildID'),
+                PRIMARY KEY('UserID', 'GuildID')
+            )";
+            cmd.ExecuteNonQuery();
+            cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblDMConnections' (
+                'UserID'        CHAR(36),
+                'ChannelID'      CHAR(36),
+                FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID'),
+                FOREIGN KEY('ChannelID') REFERENCES 'tblChannels'('ChannelID'),
+                PRIMARY KEY('UserID', 'ChannelID')
             )";
             cmd.ExecuteNonQuery();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblTokens' (
@@ -90,6 +104,14 @@ class MessageServer
                 'UserID'        CHAR(36),
                 PRIMARY KEY('Token'),
                 FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID')
+            );";
+            cmd.ExecuteNonQuery();
+            cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblGuilds' (
+                'GuildID'       CHAR(36),
+                'GuildName'     VARCHAR(36),
+                'OwnerID'       CHAR(36),
+                PRIMARY KEY('GuildID'),
+                FOREIGN KEY('OwnerID') REFERENCES 'tblUsers'('UserID')
             );";
             cmd.ExecuteNonQuery();
         }
@@ -112,6 +134,7 @@ class MessageServer
             outputStream.Write(responseBytes, 0, responseBytes.Length);
             outputStream.Close();
         }
+        Console.WriteLine("Sent response: " + responseMessage);
     }
     static string hash(string plaintext)
     {
@@ -122,9 +145,9 @@ class MessageServer
         List<string[]> messages = new List<string[]>();
         int code = 200;
         string responseMessage = "";
-        string? chatID = context.Request.QueryString["chatID"];
+        string? channelID = context.Request.QueryString["channelID"];
         string? offset = context.Request.QueryString["offset"];
-        if (string.IsNullOrEmpty(chatID)) // If missing a perameter respond with an error
+        if (string.IsNullOrEmpty(channelID)) // If missing a perameter respond with an error
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
             responseMessage = JsonSerializer.Serialize(responseJson);
@@ -138,11 +161,11 @@ class MessageServer
             {
                 con.Open();
                 cmd.CommandText = @"SELECT tblUsers.UserID, UserName, MessageID, TimeSent, MessageText
-                                    FROM tblMessages, tblUsers, tblChats
-                                    WHERE tblChats.ChatID = @ChatID
+                                    FROM tblMessages, tblUsers, tblChannels
+                                    WHERE tblChannels.ChannelID = @ChannelID
                                     AND tblMessages.UserID = tblUsers.UserID
                                     LIMIT 50 OFFSET @offset;";
-                cmd.Parameters.AddWithValue("@ChatID", chatID);
+                cmd.Parameters.AddWithValue("@ChannelID", channelID);
                 cmd.Parameters.AddWithValue("@offset", offset);
                 using (SQLiteDataReader reader = cmd.ExecuteReader())
                 {
@@ -172,16 +195,16 @@ class MessageServer
                     responseMessage += ", ";
                 }
                 i++;
-                code = 200;
             }
             responseMessage += "]"; 
+            code = 200;
         }
 
         sendResponse(context, "application/json", code, responseMessage);
     }
     static void sendMessage(HttpListenerContext context, Uri uri, string connectionString)
     {
-        string? chatID = context.Request.QueryString["chatID"];
+        string? channelID = context.Request.QueryString["channelID"];
         string? messageText = context.Request.QueryString["messageText"];
         string? token = context.Request.QueryString["token"];
         string messageID = Guid.NewGuid().ToString();
@@ -193,7 +216,7 @@ class MessageServer
             responseMessage = JsonSerializer.Serialize(responseJson);
             code = 401;
         }
-        else if (string.IsNullOrEmpty(chatID) | messageText is null | string.IsNullOrEmpty(token))
+        else if (string.IsNullOrEmpty(channelID) | messageText is null | string.IsNullOrEmpty(token))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
             responseMessage = JsonSerializer.Serialize(responseJson);
@@ -208,25 +231,18 @@ class MessageServer
                 con.Open();
                 cmd.CommandText = @"SELECT EXISTS(
                                         SELECT 1
-                                        FROM tblConnections
-                                        WHERE UserID = @UserID AND ChatID = @ChatID
+                                        FROM tblGuildConnections, tblDMConnections
+                                        WHERE tblGuildConnections.UserID = @UserID AND tblGuildConnections.ChannelID = @ChannelID
+                                        OR tblDMConnections.UserID = @UserID AND tblDMConnections.ChannelID = @ChannelID
                                     );";
                 cmd.Parameters.AddWithValue("@UserID", userID);
-                cmd.Parameters.AddWithValue("@ChatID", chatID);
-                bool hasPermission = (Int64)cmd.ExecuteScalar() > 0;
+                cmd.Parameters.AddWithValue("@ChannelID", channelID);
+                bool hasPermission = (Int64)cmd.ExecuteScalar() > 0; //Convert integer 1 or 0 into boolean
                 if (hasPermission)
                 {
-                    cmd.CommandText = @"SELECT IsDM
-                                        FROM tbl ChatID
-                                        WHERE ChatID = '{chatID}'";
-                    bool isDM = (Int64)cmd.ExecuteScalar() > 0;
-                    if (isDM)
-                    {
-                        messageText = messageText;
-                    }
-                    cmd.CommandText = @"INSERT INTO tblMessages (ChatID, TimeSent, MessageID, UserID, MessageText)
-                                        VALUES (@ChatID, strftime('%s','now'), @MessageID, @UserID, @MessageText);";
-                    cmd.Parameters.AddWithValue("@ChatID", chatID);
+                    cmd.CommandText = @"INSERT INTO tblMessages (ChannelID, TimeSent, MessageID, UserID, MessageText)
+                                        VALUES (@ChannelID, strftime('%s','now'), @MessageID, @UserID, @MessageText);";
+                    cmd.Parameters.AddWithValue("@ChannelID", channelID);
                     cmd.Parameters.AddWithValue("@MessageID", messageID);
                     cmd.Parameters.AddWithValue("@UserID", userID);
                     cmd.Parameters.AddWithValue("@MessageText", messageText);
@@ -236,7 +252,7 @@ class MessageServer
                 }
                 else
                 {
-                    var responseJson = new { error = "You do not have permission to post in this chat", errcode = "FORBIDDEN"};
+                    var responseJson = new { error = "You do not have permission to post in this channel", errcode = "FORBIDDEN"};
                     responseMessage = JsonSerializer.Serialize(responseJson);
                     code = 403;
                 }
@@ -296,20 +312,20 @@ class MessageServer
         }
         sendResponse(context, "application/json", code, responseMessage);
     }
-    static void createChat(HttpListenerContext context, Uri uri, int isDM, string connectionString)
+    static void createChannel(HttpListenerContext context, Uri uri, int isDM, string connectionString)
     {
         string responseMessage;
         int code;
-        string? chatName = context.Request.QueryString["chatName"];
+        string? channelName = context.Request.QueryString["channelName"];
         string? token = context.Request.QueryString["token"];
-        string? chatID = Guid.NewGuid().ToString();
+        string? channelID = Guid.NewGuid().ToString();
         if (!tokenValid(token, connectionString))
         {
             var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
             responseMessage = JsonSerializer.Serialize(responseJson);
             code = 401;
         }
-        else if (string.IsNullOrEmpty(chatName))
+        else if (string.IsNullOrEmpty(channelName))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
             responseMessage = JsonSerializer.Serialize(responseJson);
@@ -322,16 +338,16 @@ class MessageServer
             using (var cmd = new SQLiteCommand(con))
             {
                 con.Open();
-                cmd.CommandText = @"INSERT INTO tblChats(ChatID, ChatName, IsDM)
-                                    VALUES (@ChatID, @ChatName, @IsDM)";
-                cmd.Parameters.AddWithValue("@ChatID", chatID);
-                cmd.Parameters.AddWithValue("@ChatName", chatName);
+                cmd.CommandText = @"INSERT INTO tblChannels(ChannelID, ChannelName, IsDM)
+                                    VALUES (@ChannelID, @ChannelName, @IsDM)";
+                cmd.Parameters.AddWithValue("@ChannelID", channelID);
+                cmd.Parameters.AddWithValue("@ChannelName", channelName);
                 cmd.Parameters.AddWithValue("@IsDM", isDM);
                 cmd.ExecuteNonQuery();
-                cmd.CommandText = @"INSERT INTO tblConnections (UserID, ChatID, Admin)
-                                    VALUES (@UserID, @ChatID, 1);";
+                cmd.CommandText = @"INSERT INTO tblConnections (UserID, ChannelID, Admin)
+                                    VALUES (@UserID, @ChannelID, 1);";
                 cmd.Parameters.AddWithValue("@UserID", userID);
-                cmd.Parameters.AddWithValue("@ChatID", chatID);
+                cmd.Parameters.AddWithValue("@ChannelID", channelID);
                 cmd.ExecuteNonQuery();
             }
             responseMessage = null;
