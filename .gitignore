@@ -55,3 +55,5 @@ bin/Debug/net7.0/runtimes/win-x86/native/SQLite.Interop.dll
 data.db
 .vscode/launch.json
 .vscode/tasks.json
+obj/Debug/net7.0/apphost.exe
+bin/Debug/net7.0/nea server test.exe
