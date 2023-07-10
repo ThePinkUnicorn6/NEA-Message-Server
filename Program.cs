@@ -321,7 +321,45 @@ class MessageServer
     }
     static void apiLogin(HttpListenerContext context, Uri uri, string connectionString) // Checks if the supplied username and password are correct, and returns a token if they are
     {
-        
+        string responseMessage;
+        int code;
+        string? userName = context.Request.QueryString["userName"];
+        string? passHash = context.Request.QueryString["passHash"];
+        if (string.IsNullOrEmpty(userName) | string.IsNullOrEmpty(passHash))
+        {
+            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
+            responseMessage = JsonSerializer.Serialize(responseJson);
+            code = 400;
+        }
+        else
+        {
+            using (var con = new SQLiteConnection(connectionString))
+            using (var cmd = new SQLiteCommand(con))
+            {
+                con.Open();
+                cmd.CommandText = @"SELECT UserID
+                                    FROM tblUsers
+                                    WHERE UserName = @UserName AND PassHash = @PassHash;";
+                cmd.Parameters.AddWithValue("UserName", userName);
+                cmd.Parameters.AddWithValue("PassHash", passHash);
+                object temp = cmd.ExecuteScalar();
+                string userID = temp == null ? null : (string)temp;
+                bool correctCredentials = !string.IsNullOrEmpty(userID);
+                if (correctCredentials)
+                {
+                    var responseJson = new { token = createToken(userID, connectionString) };
+                    responseMessage = JsonSerializer.Serialize(responseJson);
+                    code = 200;  
+                }
+                else
+                {
+                    var responseJson = new { error = "Incorrect username or password.", errcode = "FORBIDDEN" };
+                    responseMessage = JsonSerializer.Serialize(responseJson);
+                    code = 403;
+                }
+            }
+            sendResponse(context, "application/json", code, responseMessage);
+        }
     }
     static void apiCreateChannel(HttpListenerContext context, Uri uri, bool isDM, string connectionString)
     {
@@ -370,7 +408,6 @@ class MessageServer
                     code = 400;
                 }
             }
-
         }
         sendResponse(context, "application/json", code, responseMessage);
     }
