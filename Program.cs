@@ -28,11 +28,11 @@ class MessageServer
             {
                 case "/api/content/getMessages": apiGetMessages(context, uri, connectionString); break;
                 case "/api/content/sendMessage": apiSendMessage(context, uri, connectionString); break;
-                case "/api/groups/createChannel": apiCreateChannel(context, uri, false, connectionString); break;
-                case "/api/groups/createDM": apiCreateChannel(context, uri, true, connectionString); break;
-                case "/api/groups/createGuild": apiCreateGuild(context, uri, connectionString); break;
-                case "/api/groups/getGuildDetails": apiGetGuildDetails(context, uri, connectionString); break;
-                case "/api/groups/setGuildSetails": apiSetGuildDetails(context, uri, connectionString); break;
+                case "/api/directMessage/create": apiCreateChannel(context, uri, true, connectionString); break;
+                case "/api/guild/createChannel": apiCreateChannel(context, uri, false, connectionString); break;
+                case "/api/guild/create": apiCreateGuild(context, uri, connectionString); break;
+                case "/api/guild/getDetails": apiGetGuildDetails(context, uri, connectionString); break;
+                case "/api/guild/setDetails": apiSetGuildDetails(context, uri, connectionString); break;
                 case "/api/account/create": apiAddUser(context, uri, connectionString); break;
                 case "/api/account/login": apiLogin(context, uri, connectionString); break;
                 case "/api/account/login/tokenToUserID": apiReturnUserIDFromToken(context, uri, connectionString); break;
@@ -80,9 +80,9 @@ class MessageServer
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblMessages' (
                 'ChannelID'     CHAR(36),
                 'TimeSent'      INT,
-                'MessageID'	    CHAR(36),
-                'UserID'	    CHAR(36),
-                'MessageText'	TEXT,
+                'MessageID'     CHAR(36),
+                'UserID'        CHAR(36),
+                'MessageText'   VARCHAR(4000),
                 FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID'),
                 FOREIGN KEY('ChannelID') REFERENCES 'tblChannels'('ChannelID'),
                 PRIMARY KEY('MessageID')
@@ -99,14 +99,14 @@ class MessageServer
             cmd.ExecuteNonQuery();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblDMConnections' (
                 'UserID'        CHAR(36),
-                'ChannelID'      CHAR(36),
+                'ChannelID'     CHAR(36),
                 FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID'),
                 FOREIGN KEY('ChannelID') REFERENCES 'tblChannels'('ChannelID'),
                 PRIMARY KEY('UserID', 'ChannelID')
             )";
             cmd.ExecuteNonQuery();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblTokens' (
-                'Token'	        CHAR(36),
+                'Token'         CHAR(36),
                 'UserID'        CHAR(36),
                 PRIMARY KEY('Token'),
                 FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID')
@@ -116,6 +116,7 @@ class MessageServer
                 'GuildID'       CHAR(36),
                 'GuildName'     VARCHAR(36),
                 'OwnerID'       CHAR(36),
+                'GuildDesc'     VARCHAR(100),
                 PRIMARY KEY('GuildID'),
                 FOREIGN KEY('OwnerID') REFERENCES 'tblUsers'('UserID')
             );";
@@ -355,31 +356,18 @@ class MessageServer
             }
             else
             {
-                bool guildExists;
-                using (var con = new SQLiteConnection(connectionString))
-                using (var cmd = new SQLiteCommand(con))
-                { 
-                    con.Open();
-                    cmd.CommandText = @"
-                    SELECT EXISTS(
-                        SELECT 1 
-                        FROM tblGuilds
-                        WHERE GuildID = @GuildID
-                    )";
-                    cmd.Parameters.AddWithValue("GuildID", guildID);
-                    guildExists = (Int64)cmd.ExecuteScalar() > 0; // Chech if guild exists
-                }
+                bool guildExists = checkGuildExists(guildID, connectionString);
                 if (guildExists)
                 {
                     createChannel(channelName, guildID, (int)channelType, connectionString);
                     responseMessage = null;
                     code = 200;
                 }
-                else 
+                else
                 {
                     var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
                     responseMessage = JsonSerializer.Serialize(responseJson);
-                    code = 401;         
+                    code = 400;
                 }
             }
 
@@ -394,7 +382,7 @@ class MessageServer
         {
             con.Open();
             cmd.CommandText = @"INSERT INTO tblChannels(ChannelID, ChannelName, ChanelType, IsDM)
-                                VALUES (@ChannelID, NULL, 1, 1)";
+                                VALUES (@ChannelID, NULL, 1, 1);";
             cmd.Parameters.AddWithValue("ChannelID", channelID);
             cmd.ExecuteNonQuery();
             // Add user to DM
@@ -419,7 +407,7 @@ class MessageServer
         {
             con.Open();
             cmd.CommandText = @"INSERT INTO tblChannels(ChannelID, ChannelName, ChannelType, IsDM, GuildID)
-                                VALUES (@ChannelID, @ChannelName, @ChannelType, 0, @GuildID)";
+                                VALUES (@ChannelID, @ChannelName, @ChannelType, 0, @GuildID);";
             cmd.Parameters.AddWithValue("ChannelID", channelID);
             cmd.Parameters.AddWithValue("ChannelName", channelName);
             cmd.Parameters.AddWithValue("ChannelType", channelType);
@@ -455,7 +443,7 @@ class MessageServer
             {
                 con.Open();
                 cmd.CommandText = @"INSERT INTO tblGuilds(GuildID, GuildName, OwnerID)
-                                    VALUES (@GuildID, @GuildName, @OwnerID)";
+                                    VALUES (@GuildID, @GuildName, @OwnerID);";
                 cmd.Parameters.AddWithValue("GuildID", guildID);
                 cmd.Parameters.AddWithValue("GuildName", guildName);
                 cmd.Parameters.AddWithValue("@OwnerID", userID);
@@ -474,7 +462,79 @@ class MessageServer
     }
     static void apiSetGuildDetails(HttpListenerContext context, Uri uri, string connectionString)
     {
-        
+        string? token = context.Request.QueryString["token"];
+        string? guildID = context.Request.QueryString["guildID"];
+        string? guildName = context.Request.QueryString["guildName"];
+        string? guildDesc = context.Request.QueryString["guildDesc"];
+        string responseMessage;
+        int code;
+
+        if (string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(token))
+        {
+            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
+            responseMessage = JsonSerializer.Serialize(responseJson);
+            code = 400;
+        }
+        else if (!tokenValid(token, connectionString))
+        {
+            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
+            responseMessage = JsonSerializer.Serialize(responseJson);
+            code = 401;
+        }
+        else if (!checkGuildExists(guildID, connectionString))
+        {
+            var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
+            responseMessage = JsonSerializer.Serialize(responseJson);
+            code = 400;
+        }
+        else 
+        {
+            using (var con = new SQLiteConnection(connectionString))
+            using (var cmd = new SQLiteCommand(con))
+            {
+                con.Open(); 
+                // Checks if it should update the guilds name, description or both
+                if (!string.IsNullOrEmpty(guildName) & !string.IsNullOrEmpty(guildDesc))
+                {
+                    cmd.CommandText = @"UPDATE tblGuilds
+                    SET GuildName = @GuildName, GuildDesc = @GuildDesc
+                    WHERE GuildID = @GuildID;";
+                    cmd.Parameters.AddWithValue("GuildName", guildName);
+                    cmd.Parameters.AddWithValue("GuildID", guildID);
+                    cmd.Parameters.AddWithValue("GuildDesc", guildDesc);
+                }
+                else if (string.IsNullOrEmpty(guildName) & !string.IsNullOrEmpty(guildDesc))
+                {
+                    cmd.CommandText = @"UPDATE tblGuilds
+                    SET GuildDesc = @GuildDesc
+                    WHERE GuildID = @GuildID;";
+                    cmd.Parameters.AddWithValue("GuildID", guildID);
+                    cmd.Parameters.AddWithValue("GuildDesc", guildDesc);
+                }
+                else if (!string.IsNullOrEmpty(guildName) & string.IsNullOrEmpty(guildDesc))
+                {
+                    cmd.CommandText = @"UPDATE tblGuilds
+                    SET GuildName = @GuildName
+                    WHERE GuildID = @GuildID;";
+                    cmd.Parameters.AddWithValue("GuildID", guildID);
+                    cmd.Parameters.AddWithValue("GuildName", guildName);
+                }
+                cmd.ExecuteNonQuery();
+            }
+            responseMessage = null;
+            code = 200;
+        }
+        sendResponse(context, "application/json", code, responseMessage);
+    }
+    static void apiCreateInvite(HttpListenerContext context, Uri uri, string connectionString)
+    {
+        Random rnd = new Random();
+        string inviteCode = "";
+        for (int i = 0; i < 8; i++)
+        {
+            inviteCode += ((char)(rnd.Next(1,26) + 64)).ToString();
+        }
+        // TODO: add invite to db and return it to user
     }
     static string createToken(string userID, string connectionString)// Generates a token that the client can then use to authenticate with
     {
@@ -573,5 +633,23 @@ class MessageServer
             }
         }
         return userID;
+    }
+    static bool checkGuildExists(string guildID, string connectionString)
+    {
+        bool guildExists;
+        using (var con = new SQLiteConnection(connectionString))
+        using (var cmd = new SQLiteCommand(con))
+        {
+            con.Open();
+            cmd.CommandText = @"
+                    SELECT EXISTS(
+                        SELECT 1 
+                        FROM tblGuilds
+                        WHERE GuildID = @GuildID
+                    );";
+            cmd.Parameters.AddWithValue("GuildID", guildID);
+            guildExists = (Int64)cmd.ExecuteScalar() > 0; // Chech if guild exists
+        }
+        return guildExists;
     }
 }
