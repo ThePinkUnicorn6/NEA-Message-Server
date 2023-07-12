@@ -1,9 +1,10 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Net;
 using System.Web;
 using System.Text;
-using System.Text.Json;
+///using System.Text.Json;
+using Newtonsoft.Json;
 using System.Text.Json.Serialization;
 using System.Data.SQLite;
 using System.Security.Cryptography;
@@ -43,7 +44,7 @@ class MessageServer
                         error = "Unrecognised request",
                         errcode = "UNRECOGNISED_URL"
                     };
-                    responseMessage = JsonSerializer.Serialize(responseJson);
+                    responseMessage = JsonConvert.SerializeObject(responseJson);
                     sendResponse(context, "application/json", 404, responseMessage);
                     Console.WriteLine(uri.AbsolutePath);
                 }
@@ -154,12 +155,16 @@ class MessageServer
         string responseMessage = "";
         string? channelID = context.Request.QueryString["channelID"];
         string? offset = context.Request.QueryString["offset"];
-        if (string.IsNullOrEmpty(channelID)) // If missing a perameter respond with an error
+        string? token = context.Request.QueryString["token"];
+        if (string.IsNullOrEmpty(channelID) | string.IsNullOrEmpty(token)) // If missing a perameter respond with an error
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 400;
         }
+
+        //TODO: Add authentication.
+
         else
         {
             if (string.IsNullOrEmpty(offset)) offset = "0";
@@ -220,13 +225,13 @@ class MessageServer
         if (string.IsNullOrEmpty(channelID) | messageText is null | string.IsNullOrEmpty(token))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 400;
         }        
         else if (!tokenValid(token, connectionString))
         {
             var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 401;
         }
         else
@@ -260,7 +265,7 @@ class MessageServer
                 else
                 {
                     var responseJson = new { error = "You do not have permission to post in this channel", errcode = "FORBIDDEN"};
-                    responseMessage = JsonSerializer.Serialize(responseJson);
+                    responseMessage = JsonConvert.SerializeObject(responseJson);
                     code = 403;
                 }
             }
@@ -278,7 +283,7 @@ class MessageServer
         if (string.IsNullOrEmpty(userName) | string.IsNullOrEmpty(publicKey) | string.IsNullOrEmpty(password))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 400;
         }
         else
@@ -298,7 +303,7 @@ class MessageServer
                 if (userTaken)
                 {
                     var responseJson = new { error = "User with that name already exists", errcode = "NAME_IN_USE"};
-                    responseMessage = JsonSerializer.Serialize(responseJson);
+                    responseMessage = JsonConvert.SerializeObject(responseJson);
                     code = 400;
                 }
                 else
@@ -312,7 +317,7 @@ class MessageServer
                     cmd.Parameters.AddWithValue("PassHash", passHash);
                     cmd.ExecuteNonQuery();
                     var responseJson = new { token = createToken(userID, connectionString) };
-                    responseMessage = JsonSerializer.Serialize(responseJson);
+                    responseMessage = JsonConvert.SerializeObject(responseJson);
                     code = 200;
                 }  
             }
@@ -328,7 +333,7 @@ class MessageServer
         if (string.IsNullOrEmpty(userName) | string.IsNullOrEmpty(passHash))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 400;
         }
         else
@@ -343,18 +348,18 @@ class MessageServer
                 cmd.Parameters.AddWithValue("UserName", userName);
                 cmd.Parameters.AddWithValue("PassHash", passHash);
                 object temp = cmd.ExecuteScalar();
-                string userID = temp == null ? null : (string)temp;
+                string userID = temp == null ? null : (string)temp; // If the select returns null, store string as null, otherwise as a string.
                 bool correctCredentials = !string.IsNullOrEmpty(userID);
                 if (correctCredentials)
                 {
                     var responseJson = new { token = createToken(userID, connectionString) };
-                    responseMessage = JsonSerializer.Serialize(responseJson);
+                    responseMessage = JsonConvert.SerializeObject(responseJson);
                     code = 200;  
                 }
                 else
                 {
                     var responseJson = new { error = "Incorrect username or password.", errcode = "FORBIDDEN" };
-                    responseMessage = JsonSerializer.Serialize(responseJson);
+                    responseMessage = JsonConvert.SerializeObject(responseJson);
                     code = 403;
                 }
             }
@@ -374,13 +379,13 @@ class MessageServer
         if (string.IsNullOrEmpty(channelName) | string.IsNullOrEmpty(token) | (isDM & string.IsNullOrEmpty(userID2)) | (!isDM & string.IsNullOrEmpty(guildID)))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 400;
         }
         else if (!tokenValid(token, connectionString))
         {
             var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 401;
         }
         else
@@ -404,7 +409,7 @@ class MessageServer
                 else
                 {
                     var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
-                    responseMessage = JsonSerializer.Serialize(responseJson);
+                    responseMessage = JsonConvert.SerializeObject(responseJson);
                     code = 400;
                 }
             }
@@ -463,13 +468,13 @@ class MessageServer
         if (string.IsNullOrEmpty(guildName) | string.IsNullOrEmpty(token))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 400;
         }
         else if (!tokenValid(token, connectionString))
         {
             var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 401;
         }
         else 
@@ -488,12 +493,12 @@ class MessageServer
             }
             createChannel("General", guildID, 1, connectionString);
             var responseJson = new { GuildID = guildID};
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 200;
         }
         sendResponse(context, "application/json", code, responseMessage);
     }
-    static void apiGetGuildDetails(HttpListenerContext context, Uri uri, string connectionString)
+    static void apiGetGuildDetails(HttpListenerContext context, Uri uri, string connectionString) // Returns guild name, description and all users that are part of it.
     {
 
     }
@@ -509,19 +514,19 @@ class MessageServer
         if (string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(token))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 400;
         }
         else if (!tokenValid(token, connectionString))
         {
             var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 401;
         }
         else if (!checkGuildExists(guildID, connectionString))
         {
             var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 400;
         }
         else 
@@ -607,7 +612,7 @@ class MessageServer
         }
         return userID;
     }
-    static bool tokenValid(string token, string connectionString)
+    static bool tokenValid(string? token, string connectionString)
     {
         bool valid;
         using (var con = new SQLiteConnection(connectionString))
@@ -634,25 +639,25 @@ class MessageServer
         if (string.IsNullOrEmpty(token))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 400;
         }
         else if (!tokenValid(token, connectionString))
         {
             var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 401;
         }
         else
         {
             userID = getUserIDFromToken(token, connectionString);
             var responseJson = new { UserID = userID };
-            responseMessage = JsonSerializer.Serialize(responseJson);
+            responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 200;
         }
         sendResponse(context, "application/json", code, responseMessage);
     }
-    static string getUserIDFromUsername(string userName, string connectionString)// Looks up a UserName and returns the asociated UserID
+    static string getUserIDFromUsername(string? userName, string connectionString)// Looks up a UserName and returns the asociated UserID
     {
         string userID;
         using (var con = new SQLiteConnection(connectionString))
@@ -663,11 +668,9 @@ class MessageServer
                                 FROM tblUsers
                                 WHERE UserName = @UserName";
             cmd.Parameters.AddWithValue("UserName", userName);
-            using (SQLiteDataReader reader = cmd.ExecuteReader())
-            {
-                reader.Read();
-                userID = reader.GetString(0);
-            }
+
+            object temp = cmd.ExecuteScalar();
+            userID = temp == null ? null : (string)temp; // If the select returns null, store string as null, otherwise as a string.
         }
         return userID;
     }
