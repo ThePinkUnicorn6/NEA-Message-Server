@@ -563,37 +563,36 @@ class MessageServer
                     }
                 }
             }
-            List<Guild> guildsObj = new List<Guild> {};
-            List<Channel> channelsObj = new List<Channel>{};
-            foreach (dynamic row in dbResponse)
+            string guildsJson = "[{"; 
+            for (int i = 0; i < dbResponse.Count; i++) // Build the json response string
             {
-                if (guildsObj.Count == 0 || row.GuildID != guildsObj[guildsObj.Count - 1].ID) // If the current row has a differnt GuildID from the last, create a new guild object.
+                if (i == 0 || dbResponse[i].GuildID != dbResponse[i - 1].GuildID) // If the guildID is different from the previous iteration, start a new guild in the JSON array.
                 {
-                    guildsObj.Add
-                    (
-                        new Guild 
-                        {
-                            ID = (string)row.GuildID,
-                            Name = (string)row.GuildName,
-                            OwnerID = (string)row.GuildOwnerID,
-                            Description = (string)row.GuildDesc,
-                            Channels = channelsObj
-                        }
-                    );
-                }                   
-                channelsObj.Add
-                (
-                    new Channel
-                    {
-                        ID = (string)row.ChannelID,
-                        Name = (string)row.ChannelName,
-                        Type = (int)row.ChannelType,
-                        Description = (string)row.ChannelDesc,
-                        IsDM = (int)row.ChannelIsDM
-                    }
-                );
+                    guildsJson += "\"guildID\": \"" + dbResponse[i].GuildID + "\", ";
+                    guildsJson += "\"guildName\": \"" + dbResponse[i].GuildName + "\", ";
+                    guildsJson += "\"guildDesc\": \"" + dbResponse[i].GuildDesc + "\", ";
+                    guildsJson += "\"channels\": [";
+                }
+                guildsJson += "{";
+                guildsJson += "\"channelID\": \"" + dbResponse[i].ChannelID + "\", ";
+                guildsJson += "\"channelName\": \"" + dbResponse[i].ChannelName + "\", ";
+                guildsJson += "\"channelID\": \"" + dbResponse[i].ChannelID + "\", ";
+                guildsJson += "\"channelType\": \"" + dbResponse[i].ChannelType + "\"}";
+                if (dbResponse.Count > i + 1 && dbResponse[i].GuildID == dbResponse[i + 1].GuildID)
+                {
+                    guildsJson += ", ";
+                }
+                else if (dbResponse.Count > i + 1 && dbResponse[i].GuildID != dbResponse[i + 1].GuildID)
+                {
+                    guildsJson += "]}, {";
+                }
+                else if (dbResponse.Count == i + 1)
+                {
+                    guildsJson += "]}";
+                }
             }
-            responseMessage = JsonConvert.SerializeObject(guildsObj);
+            guildsJson += "]";
+            responseMessage = guildsJson;
             code = 200;            
         }
         sendResponse(context, "application/json", code, responseMessage);
