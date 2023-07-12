@@ -72,7 +72,7 @@ class MessageServer
                 'ChannelID'     CHAR(36),
                 'ChannelName'   VARCHAR(20),
                 'ChannelType'   INTEGER,
-                'ChanelDesc'    VARCHAR(100),
+                'ChannelDesc'    VARCHAR(100),
                 'IsDM'          BOOL,
                 'GuildID'       CHAR(36),
                 PRIMARY KEY('ChannelID')
@@ -490,6 +490,11 @@ class MessageServer
                 cmd.Parameters.AddWithValue("GuildName", guildName);
                 cmd.Parameters.AddWithValue("@OwnerID", userID);
                 cmd.ExecuteNonQuery();
+                cmd.CommandText = @"INSERT INTO tblGuildConnections(UserID, GuildID, Admin)
+                                    VALUES (@UserID, @GuildID, 1);";
+                cmd.Parameters.AddWithValue("UserID", userID);
+                cmd.Parameters.AddWithValue("GuildID", guildID);
+                cmd.ExecuteNonQuery();
             }
             createChannel("General", guildID, 1, connectionString);
             var responseJson = new { GuildID = guildID};
@@ -521,38 +526,77 @@ class MessageServer
         }
         else 
         {
-            List<Channel> channels = new List<Channel>
+            List<dynamic> dbResponse = new List<dynamic>{};
+            string userID = getUserIDFromToken(token, connectionString);
+            using (var con = new SQLiteConnection(connectionString))
+            using (var cmd = new SQLiteCommand(con))
             {
-                new Channel 
+                con.Open();
+                cmd.CommandText = @"SELECT tblGuilds.GuildID, GuildName, OwnerID, GuildDesc, ChannelID, ChannelName, ChannelType, ChannelDesc, IsDM
+                FROM tblGuilds, tblGuildConnections, tblChannels, tblUsers
+                WHERE tblUsers.UserID = @UserID 
+                AND tblUsers.UserID = tblGuildConnections.UserID
+                AND tblGuildConnections.GuildID = tblGuilds.GuildID
+                And tblGuilds.GuildID = tblChannels.GuildID
+                ;";
+                cmd.Parameters.AddWithValue("UserID", userID);
+                using (SQLiteDataReader reader = cmd.ExecuteReader())
                 {
-                    Name = "Channel1",
-                    ID = "12344567",
-                    Type = 1,
-                    Description = "A channel",
-                    IsDM = false, 
-                },
-                new Channel
-                {
-                    Name = "Channel2",
-                    ID = "abcdefghijklmnopqrstuvwxyz",
-                    Type = 1,
-                    Description = "Another channel",
-                    IsDM = false, 
+                    while (reader.Read())
+                    {                               //GuildID             GuildName            OwnerID              GuildDesc            ChannelID            ChannelName          ChannelType         ChannelDesc          IsDM
+                        //dbResponse.Add(new object[] {reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetInt32(6), reader.GetString(7), reader.GetInt32(8)});
+                        object temp = reader[7];
+                        string channelDesc = temp == null ? null : temp.ToString(); // If description is null, set the variable to null to stop it from erroring.
+                        var responseRow = new
+                        {
+                            GuildID = reader.GetString(0),
+                            GuildName = reader.GetString(1),
+                            GuildOwnerID = reader.GetString(2),
+                            GuildDesc = reader.GetString(3),
+                            ChannelID = reader.GetString(4),
+                            ChannelName = reader.GetString(5),
+                            ChannelType = reader.GetInt32(6),
+                            ChannelDesc = channelDesc,
+                            ChannelIsDM = reader.GetInt32(8)
+                        };
+                        dbResponse.Add(responseRow);
+                    }
                 }
-            };
-            
-            List<Guild> guilds = new List<Guild> 
+            }
+            List<Guild> guildsObj = new List<Guild> {};
+            List<Channel> channelsObj = new List<Channel>{};
+            foreach (dynamic row in dbResponse)
             {
-                new Guild
+                if (guildsObj.Count == 0 || row.GuildID != guildsObj[guildsObj.Count - 1].ID) // If the current row has a differnt GuildID from the last, create a new guild object.
                 {
-                    Name = "A guild",
-                    ID = "xoicednvoayunrs",
-                    Channels = channels
-                }
-            };
-            string guildJson = JsonConvert.SerializeObject(guilds);
-            Console.WriteLine(guildJson);
+                    guildsObj.Add
+                    (
+                        new Guild 
+                        {
+                            ID = (string)row.GuildID,
+                            Name = (string)row.GuildName,
+                            OwnerID = (string)row.GuildOwnerID,
+                            Description = (string)row.GuildDesc,
+                            Channels = channelsObj
+                        }
+                    );
+                }                   
+                channelsObj.Add
+                (
+                    new Channel
+                    {
+                        ID = (string)row.ChannelID,
+                        Name = (string)row.ChannelName,
+                        Type = (int)row.ChannelType,
+                        Description = (string)row.ChannelDesc,
+                        IsDM = (int)row.ChannelIsDM
+                    }
+                );
+            }
+            responseMessage = JsonConvert.SerializeObject(guildsObj);
+            code = 200;            
         }
+        sendResponse(context, "application/json", code, responseMessage);
     }
     static void apiSetGuildDetails(HttpListenerContext context, Uri uri, string connectionString)
     {
