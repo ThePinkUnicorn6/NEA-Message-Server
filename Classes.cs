@@ -11,9 +11,10 @@ class Message
 }
 class Guild
 {
-    [JsonProperty(PropertyName = "Name")]
     public string Name;
     public string ID;
+    public string OwnerID;
+    public string Description;
     public List<Channel> Channels;
 }
 class Channel
@@ -22,5 +23,5 @@ class Channel
     public string ID;
     public int Type;
     public string Description;
-    public bool IsDM;
+    public int IsDM;
 }
