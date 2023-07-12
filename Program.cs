@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Net;
 using System.Web;
@@ -14,7 +14,6 @@ class MessageServer
     {
         const string connectionString = "Data Source=data.db; Version=3; New=True; Compress=True;";
         createDB(connectionString);
-        
         const string url = "http://localhost:8080/";//sets up http server
         HttpListener listener = new HttpListener();
         listener.Prefixes.Add(url);
@@ -33,6 +32,7 @@ class MessageServer
                 case "/api/guild/createChannel": apiCreateChannel(context, uri, false, connectionString); break;
                 case "/api/guild/create": apiCreateGuild(context, uri, connectionString); break;
                 case "/api/guild/getDetails": apiGetGuildDetails(context, uri, connectionString); break;
+                case "/api/guild/listGuilds": apiListGuilds(context, uri, connectionString); break;
                 case "/api/guild/setDetails": apiSetGuildDetails(context, uri, connectionString); break;
                 case "/api/account/create": apiAddUser(context, uri, connectionString); break;
                 case "/api/account/login": apiLogin(context, uri, connectionString); break;
@@ -192,7 +192,7 @@ class MessageServer
             foreach (string[] message in messages)
             {
 
-                var messageObj = new
+                Message messageObj = new Message
                 {
                     UserID = message[0],
                     UserName = message[1],
@@ -200,7 +200,7 @@ class MessageServer
                     TimeSent = message[3],
                     MessageText = message[4]
                 };
-                string messageJson = JsonSerializer.Serialize(messageObj);
+                string messageJson = JsonConvert.SerializeObject(messageObj);
                 responseMessage += messageJson;
                 if (i < messages.Count - 1)
                 {
@@ -501,6 +501,58 @@ class MessageServer
     static void apiGetGuildDetails(HttpListenerContext context, Uri uri, string connectionString) // Returns guild name, description and all users that are part of it.
     {
 
+    }
+    static void apiListGuilds(HttpListenerContext context, Uri uri, string connectionString) // Returns all guilds the user is part of, and the channels in each guild.
+    {
+        string? token = context.Request.QueryString["token"];
+        string responseMessage;
+        int code;
+        if (string.IsNullOrEmpty(token))
+        {
+            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 400;
+        }
+        else if (!tokenValid(token, connectionString))
+        {
+            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 401;
+        }
+        else 
+        {
+            List<Channel> channels = new List<Channel>
+            {
+                new Channel 
+                {
+                    Name = "Channel1",
+                    ID = "12344567",
+                    Type = 1,
+                    Description = "A channel",
+                    IsDM = false, 
+                },
+                new Channel
+                {
+                    Name = "Channel2",
+                    ID = "abcdefghijklmnopqrstuvwxyz",
+                    Type = 1,
+                    Description = "Another channel",
+                    IsDM = false, 
+                }
+            };
+            
+            List<Guild> guilds = new List<Guild> 
+            {
+                new Guild
+                {
+                    Name = "A guild",
+                    ID = "xoicednvoayunrs",
+                    Channels = channels
+                }
+            };
+            string guildJson = JsonConvert.SerializeObject(guilds);
+            Console.WriteLine(guildJson);
+        }
     }
     static void apiSetGuildDetails(HttpListenerContext context, Uri uri, string connectionString)
     {
