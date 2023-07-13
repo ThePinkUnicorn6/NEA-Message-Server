@@ -11,17 +11,17 @@ class Message
 }
 class Guild
 {
-    public string Name;
-    public string ID;
-    public string OwnerID;
-    public string Description;
-    public List<Channel> Channels;
+    public string Name {get; set;}
+    public string ID {get; set;}
+    public string OwnerID {get; set;}
+    public string Description {get; set;}
+    public List<Channel> Channels {get; set;}
 }
 class Channel
 {
-    public string Name;
-    public string ID;
-    public int Type;
-    public string Description;
-    public int IsDM;
+    public string Name {get; set;}
+    public string ID {get; set;}
+    public int Type {get; set;}
+    public string Description {get; set;}
+    public int IsDM {get; set;}
 }

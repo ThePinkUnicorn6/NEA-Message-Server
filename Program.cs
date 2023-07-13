@@ -24,31 +24,40 @@ class MessageServer
             HttpListenerContext context = listener.GetContext();
             Uri uri = new Uri(context.Request.Url.ToString());
             string responseMessage;
-            switch (uri.AbsolutePath) //calls function used for each api endpoint
+            try
             {
-                case "/api/content/getMessages": apiGetMessages(context, uri, connectionString); break;
-                case "/api/content/sendMessage": apiSendMessage(context, uri, connectionString); break;
-                case "/api/directMessage/create": apiCreateChannel(context, uri, true, connectionString); break;
-                case "/api/guild/createChannel": apiCreateChannel(context, uri, false, connectionString); break;
-                case "/api/guild/create": apiCreateGuild(context, uri, connectionString); break;
-                case "/api/guild/getDetails": apiGetGuildDetails(context, uri, connectionString); break;
-                case "/api/guild/listGuilds": apiListGuilds(context, uri, connectionString); break;
-                case "/api/guild/setDetails": apiSetGuildDetails(context, uri, connectionString); break;
-                case "/api/account/create": apiAddUser(context, uri, connectionString); break;
-                case "/api/account/login": apiLogin(context, uri, connectionString); break;
-                case "/api/account/login/tokenToUserID": apiReturnUserIDFromToken(context, uri, connectionString); break;
-                default:
+                switch (uri.AbsolutePath) //calls function used for each api endpoint
                 {
-                    var responseJson = new
+                    case "/api/content/getMessages": apiGetMessages(context, uri, connectionString); break;
+                    case "/api/content/sendMessage": apiSendMessage(context, uri, connectionString); break;
+                    case "/api/directMessage/create": apiCreateChannel(context, uri, true, connectionString); break;
+                    case "/api/guild/createChannel": apiCreateChannel(context, uri, false, connectionString); break;
+                    case "/api/guild/create": apiCreateGuild(context, uri, connectionString); break;
+                    case "/api/guild/getDetails": apiGetGuildDetails(context, uri, connectionString); break;
+                    case "/api/guild/listGuilds": apiListGuilds(context, uri, connectionString); break;
+                    case "/api/guild/setDetails": apiSetGuildDetails(context, uri, connectionString); break;
+                    case "/api/account/create": apiAddUser(context, uri, connectionString); break;
+                    case "/api/account/login": apiLogin(context, uri, connectionString); break;
+                    case "/api/account/login/tokenToUserID": apiReturnUserIDFromToken(context, uri, connectionString); break;
+                    default:
                     {
-                        error = "Unrecognised request",
-                        errcode = "UNRECOGNISED_URL"
-                    };
-                    responseMessage = JsonConvert.SerializeObject(responseJson);
-                    sendResponse(context, "application/json", 404, responseMessage);
-                    Console.WriteLine(uri.AbsolutePath);
+                        var responseJson = new
+                        {
+                            error = "Unrecognised request",
+                            errcode = "UNRECOGNISED_URL"
+                        };
+                        responseMessage = JsonConvert.SerializeObject(responseJson);
+                        sendResponse(context, "application/json", 404, responseMessage);
+                        Console.WriteLine(uri.AbsolutePath);
+                    }
+                    break;
                 }
-                break;
+            }
+            catch (Exception e)
+            {
+                var responseJson = new { error = "Unknown error: " + e.ToString(), errcode = "UNKNOWN" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                sendResponse(context, "application/json", 500, responseMessage);
             }
         }
     }
@@ -532,7 +541,7 @@ class MessageServer
             using (var cmd = new SQLiteCommand(con))
             {
                 con.Open();
-                cmd.CommandText = @"SELECT tblGuilds.GuildID, GuildName, OwnerID, GuildDesc, ChannelID, ChannelName, ChannelType, ChannelDesc, IsDM
+                cmd.CommandText = @"SELECT tblGuilds.GuildID, GuildName, OwnerID, GuildDesc, ChannelID, ChannelName, ChannelType, ChannelDesc
                 FROM tblGuilds, tblGuildConnections, tblChannels, tblUsers
                 WHERE tblUsers.UserID = @UserID 
                 AND tblUsers.UserID = tblGuildConnections.UserID
@@ -547,17 +556,18 @@ class MessageServer
                         //dbResponse.Add(new object[] {reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetInt32(6), reader.GetString(7), reader.GetInt32(8)});
                         object temp = reader[7];
                         string channelDesc = temp == null ? null : temp.ToString(); // If description is null, set the variable to null to stop it from erroring.
+                        temp = reader[3];
+                        string guildDesc = temp == null ? null : temp.ToString();
                         var responseRow = new
                         {
                             GuildID = reader.GetString(0),
                             GuildName = reader.GetString(1),
                             GuildOwnerID = reader.GetString(2),
-                            GuildDesc = reader.GetString(3),
+                            GuildDesc = guildDesc,
                             ChannelID = reader.GetString(4),
                             ChannelName = reader.GetString(5),
                             ChannelType = reader.GetInt32(6),
-                            ChannelDesc = channelDesc,
-                            ChannelIsDM = reader.GetInt32(8)
+                            ChannelDesc = channelDesc
                         };
                         dbResponse.Add(responseRow);
                     }
@@ -566,32 +576,33 @@ class MessageServer
             string guildsJson = "[{"; 
             for (int i = 0; i < dbResponse.Count; i++) // Build the json response string
             {
-                if (i == 0 || dbResponse[i].GuildID != dbResponse[i - 1].GuildID) // If the guildID is different from the previous iteration, start a new guild in the JSON array.
+                if (i == 0 || dbResponse[i].GuildID != dbResponse[i - 1].GuildID) // If the guildID is different from the previous iteration, start a new guild item in the JSON array.
                 {
-                    guildsJson += "\"guildID\": \"" + dbResponse[i].GuildID + "\", ";
                     guildsJson += "\"guildName\": \"" + dbResponse[i].GuildName + "\", ";
+                    guildsJson += "\"guildID\": \"" + dbResponse[i].GuildID + "\", ";
+                    guildsJson += "\"guildOwnerID\": \"" + dbResponse[i].GuildOwnerID + "\", ";
                     guildsJson += "\"guildDesc\": \"" + dbResponse[i].GuildDesc + "\", ";
                     guildsJson += "\"channels\": [";
                 }
-                guildsJson += "{";
-                guildsJson += "\"channelID\": \"" + dbResponse[i].ChannelID + "\", ";
+                guildsJson += "{"; // Build channel array in guilds json array.
                 guildsJson += "\"channelName\": \"" + dbResponse[i].ChannelName + "\", ";
                 guildsJson += "\"channelID\": \"" + dbResponse[i].ChannelID + "\", ";
+                guildsJson += "\"channelDesc\": \"" + dbResponse[i].ChannelDesc + "\", ";
                 guildsJson += "\"channelType\": \"" + dbResponse[i].ChannelType + "\"}";
                 if (dbResponse.Count > i + 1 && dbResponse[i].GuildID == dbResponse[i + 1].GuildID)
                 {
-                    guildsJson += ", ";
+                    guildsJson += ", "; // Add comma if needed.
                 }
                 else if (dbResponse.Count > i + 1 && dbResponse[i].GuildID != dbResponse[i + 1].GuildID)
                 {
-                    guildsJson += "]}, {";
-                }
-                else if (dbResponse.Count == i + 1)
-                {
-                    guildsJson += "]}";
+                    guildsJson += "]}, {"; // Add closing brackets and opening bracket at start of new guild item.
                 }
             }
-            guildsJson += "]";
+            if (dbResponse.Count != 0) // If there was stuff returned, end the array.
+            {
+                guildsJson += "]";
+            }
+            guildsJson += "}]"; // Add closing brackets.
             responseMessage = guildsJson;
             code = 200;            
         }
@@ -658,8 +669,8 @@ class MessageServer
                 }
                 cmd.ExecuteNonQuery();
             }
-            responseMessage = null;
             code = 200;
+            responseMessage = null;
         }
         sendResponse(context, "application/json", code, responseMessage);
     }
