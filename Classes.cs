@@ -25,3 +25,10 @@ class Channel
     public string Description {get; set;}
     public int IsDM {get; set;}
 }
+class User
+{
+    public string Name {get; set;}
+    public string ID {get; set;}
+    public string Description {get; set;}
+    public string Picture {get; set;}
+}
