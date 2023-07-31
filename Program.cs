@@ -10,14 +10,16 @@ using System.Data.SQLite;
 using System.Security.Cryptography;
 class MessageServer
 {
+    const string typeJson = "application/json"; // For ease of use when sending a response.
+
     static void Main(string[] args)
     {
         const string connectionString = "Data Source=data.db; Version=3; New=True; Compress=True;";
         createDB(connectionString);
-        const string url = "http://localhost:8080/";//sets up http server
+        const string url = "http://localhost:8080/";// Sets up http server
         HttpListener listener = new HttpListener();
         listener.Prefixes.Add(url);
-        listener.Start(); //starts http server
+        listener.Start(); // Starts http server
         Console.WriteLine("Listening for requests on " + url);
         while (true)
         {
@@ -26,14 +28,14 @@ class MessageServer
             string responseMessage;
             try
             {
-                switch (uri.AbsolutePath) //calls function used for each api endpoint
+                switch (uri.AbsolutePath) // Calls function used for each api endpoint
                 {
                     case "/api/content/getMessages": apiGetMessages(context, uri, connectionString); break;
                     case "/api/content/sendMessage": apiSendMessage(context, uri, connectionString); break;
+                    case "/api/user/getInfo": apiGetUserInfo(context, uri, connectionString); break;
                     case "/api/directMessage/create": apiCreateChannel(context, uri, true, connectionString); break;
                     case "/api/guild/createChannel": apiCreateChannel(context, uri, false, connectionString); break;
                     case "/api/guild/create": apiCreateGuild(context, uri, connectionString); break;
-                    case "/api/guild/getDetails": apiGetGuildDetails(context, uri, connectionString); break;
                     case "/api/guild/listGuilds": apiListGuilds(context, uri, connectionString); break;
                     case "/api/guild/setDetails": apiSetGuildDetails(context, uri, connectionString); break;
                     case "/api/account/create": apiAddUser(context, uri, connectionString); break;
@@ -47,7 +49,7 @@ class MessageServer
                             errcode = "UNRECOGNISED_URL"
                         };
                         responseMessage = JsonConvert.SerializeObject(responseJson);
-                        sendResponse(context, "application/json", 404, responseMessage);
+                        sendResponse(context, typeJson, 404, responseMessage);
                         Console.WriteLine(uri.AbsolutePath);
                     }
                     break;
@@ -57,7 +59,7 @@ class MessageServer
             {
                 var responseJson = new { error = "Unknown error: " + e.ToString(), errcode = "UNKNOWN" };
                 responseMessage = JsonConvert.SerializeObject(responseJson);
-                sendResponse(context, "application/json", 500, responseMessage);
+                sendResponse(context, typeJson, 500, responseMessage);
             }
         }
     }
@@ -159,8 +161,8 @@ class MessageServer
     }
     static void apiGetMessages(HttpListenerContext context, Uri uri, string connectionString)//Fetches message data from db if user has permission, and returns it as a json array.
     {
-        List<string[]> messages = new List<string[]>();
-        int code = 200;
+        List<Message> messages = new List<Message>();
+        int code;
         string responseMessage = "";
         string? channelID = context.Request.QueryString["channelID"];
         string? offset = context.Request.QueryString["offset"];
@@ -192,24 +194,23 @@ class MessageServer
                 {
                     while (reader.Read())
                     {
-                        messages.Add(new string[] {reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3).ToString(), reader.GetString(4)});
+                        Message responseRow = new Message
+                        {
+                            UserID = reader.GetString(0),
+                            UserName = reader.GetString(1),
+                            MessageID = reader.GetString(2),
+                            TimeSent = reader.GetInt32(3).ToString(),
+                            MessageText = reader.GetString(4)
+                        };
+                        messages.Add(responseRow);
                     }
                 }
             }
             int i = 0;
             responseMessage += "[";
-            foreach (string[] message in messages)
+            foreach (Message message in messages)
             {
-
-                Message messageObj = new Message
-                {
-                    UserID = message[0],
-                    UserName = message[1],
-                    MessageID = message[2],
-                    TimeSent = message[3],
-                    MessageText = message[4]
-                };
-                string messageJson = JsonConvert.SerializeObject(messageObj);
+                string messageJson = JsonConvert.SerializeObject(message);
                 responseMessage += messageJson;
                 if (i < messages.Count - 1)
                 {
@@ -221,7 +222,7 @@ class MessageServer
             code = 200;
         }
 
-        sendResponse(context, "application/json", code, responseMessage);
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static void apiSendMessage(HttpListenerContext context, Uri uri, string connectionString)
     {
@@ -231,7 +232,7 @@ class MessageServer
         string messageID = Guid.NewGuid().ToString();
         int code;
         string? responseMessage;
-        if (string.IsNullOrEmpty(channelID) | messageText is null | string.IsNullOrEmpty(token))
+        if (string.IsNullOrEmpty(channelID) | string.IsNullOrEmpty(messageText) | string.IsNullOrEmpty(token))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
             responseMessage = JsonConvert.SerializeObject(responseJson);
@@ -246,21 +247,13 @@ class MessageServer
         else
         {
             string userID = getUserIDFromToken(token, connectionString);
-            using (var con = new SQLiteConnection(connectionString))
-            using (var cmd = new SQLiteCommand(con))
+            if (checkUserAccess(connectionString, channelID, userID) == true)
             {
-                con.Open();
-                cmd.CommandText = @"SELECT EXISTS(
-                                        SELECT 1
-                                        FROM tblGuildConnections, tblDMConnections
-                                        WHERE tblGuildConnections.UserID = @UserID AND tblGuildConnections.ChannelID = @ChannelID
-                                        OR tblDMConnections.UserID = @UserID AND tblDMConnections.ChannelID = @ChannelID
-                                    );";
-                cmd.Parameters.AddWithValue("UserID", userID);
-                cmd.Parameters.AddWithValue("ChannelID", channelID);
-                bool hasPermission = (Int64)cmd.ExecuteScalar() > 0; //Convert integer 1 or 0 into boolean
-                if (hasPermission)
+                // TODO: check user permissions and channel type
+                using (var con = new SQLiteConnection(connectionString))
+                using (var cmd = new SQLiteCommand(con))
                 {
+                    con.Open();
                     cmd.CommandText = @"INSERT INTO tblMessages (ChannelID, TimeSent, MessageID, UserID, MessageText)
                                         VALUES (@ChannelID, strftime('%s','now'), @MessageID, @UserID, @MessageText);";
                     cmd.Parameters.AddWithValue("ChannelID", channelID);
@@ -271,15 +264,93 @@ class MessageServer
                     responseMessage = null;
                     code = 200;
                 }
-                else
+            }
+            else
+            {
+                var responseJson = new { error = "You do not have permission to post in this channel", errcode = "FORBIDDEN" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 403;
+            }
+        }
+        sendResponse(context, typeJson, code, responseMessage);
+    }
+
+    private static bool checkUserAccess(string connectionString, string? channelID, string userID)
+    {
+        bool hasPermission;
+        using (var con = new SQLiteConnection(connectionString))
+        using (var cmd = new SQLiteCommand(con))
+        {
+            con.Open();
+            cmd.CommandText = @"SELECT EXISTS(
+                                    SELECT 1
+                                    FROM tblGuildConnections, tblGuilds, tblChannels
+                                    WHERE tblGuildConnections.UserID = @UserID AND tblGuildConnections.GuildID = tblChannels.GuildID AND tblChannels.ChannelID = @ChannelID
+                                    UNION
+                                    SELECT 1 
+                                    FROM tblDMConnections, tblChannels
+                                    WHERE tblDMConnections.UserID = @UserID AND tblDMConnections.ChannelID = @ChannelID
+                                    );"; // Checks if user is in a guild or private [channel
+            cmd.Parameters.AddWithValue("UserID", userID);
+            cmd.Parameters.AddWithValue("ChannelID", channelID);
+            hasPermission = (Int64)cmd.ExecuteScalar() > 0; //Convert integer 1 or 0 into boolean
+        }
+        return hasPermission;
+    }
+
+    static void apiGetUserInfo(HttpListenerContext context, Uri uri, string connectionString)
+    {
+        string? token = context.Request.QueryString["token"];
+        string? requestedUserID = context.Request.QueryString["userID"];
+        int code;
+        string responseMessage;
+        if (string.IsNullOrEmpty(token) | string.IsNullOrEmpty(requestedUserID))
+        {
+            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 400;
+        }        
+        else if (!tokenValid(token, connectionString))
+        {
+            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 401;
+        }
+        else
+        {
+            using (var con = new SQLiteConnection(connectionString))
+            using (var cmd = new SQLiteCommand(con))
+            {
+                con.Open();
+                cmd.CommandText = @"SELECT UserID, UserName, Picture, Description
+                FROM tblUsers
+                WHERE UserID = @UserID";
+                cmd.Parameters.AddWithValue("UserID", requestedUserID);
+                using (SQLiteDataReader reader = cmd.ExecuteReader())
                 {
-                    var responseJson = new { error = "You do not have permission to post in this channel", errcode = "FORBIDDEN"};
-                    responseMessage = JsonConvert.SerializeObject(responseJson);
-                    code = 403;
+                    if (!reader.Read())
+                    {
+                        var responseJson = new { error = "That UserID does not exist", errcode = "NOT_FOUND" };
+                        responseMessage = JsonConvert.SerializeObject(responseJson);
+                        code = 400;
+                    }
+                    else
+                    {
+                        string description = reader[3] == null ? null : reader[3].ToString();
+                        User user = new User
+                        {
+                            ID = reader.GetString(0),
+                            Name = reader.GetString(1),
+                            Picture = reader.GetString(2),
+                            Description = description
+                        };
+                        responseMessage = JsonConvert.SerializeObject(user);
+                        code = 200;
+                    }
+                    sendResponse(context, typeJson, code, responseMessage);
                 }
             }
         }
-        sendResponse(context, "application/json", code, responseMessage);
     }
     static void apiAddUser(HttpListenerContext context, Uri uri, string connectionString)
     {
@@ -331,7 +402,7 @@ class MessageServer
                 }  
             }
         }
-        sendResponse(context, "application/json", code, responseMessage);
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static void apiLogin(HttpListenerContext context, Uri uri, string connectionString) // Checks if the supplied username and password are correct, and returns a token if they are
     {
@@ -372,7 +443,7 @@ class MessageServer
                     code = 403;
                 }
             }
-            sendResponse(context, "application/json", code, responseMessage);
+            sendResponse(context, typeJson, code, responseMessage);
         }
     }
     static void apiCreateChannel(HttpListenerContext context, Uri uri, bool isDM, string connectionString)
@@ -423,7 +494,7 @@ class MessageServer
                 }
             }
         }
-        sendResponse(context, "application/json", code, responseMessage);
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static void createDM(string userID1, string userID2, string connectionString)
     {
@@ -510,11 +581,7 @@ class MessageServer
             responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 200;
         }
-        sendResponse(context, "application/json", code, responseMessage);
-    }
-    static void apiGetGuildDetails(HttpListenerContext context, Uri uri, string connectionString) // Returns guild name, description and all users that are part of it.
-    {
-
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static void apiListGuilds(HttpListenerContext context, Uri uri, string connectionString) // Returns all guilds the user is part of, and the channels in each guild.
     {
@@ -547,17 +614,14 @@ class MessageServer
                 AND tblUsers.UserID = tblGuildConnections.UserID
                 AND tblGuildConnections.GuildID = tblGuilds.GuildID
                 And tblGuilds.GuildID = tblChannels.GuildID
-                ;";
+                ORDER BY GuildName ASC;";
                 cmd.Parameters.AddWithValue("UserID", userID);
                 using (SQLiteDataReader reader = cmd.ExecuteReader())
                 {
                     while (reader.Read())
-                    {                               //GuildID             GuildName            OwnerID              GuildDesc            ChannelID            ChannelName          ChannelType         ChannelDesc          IsDM
-                        //dbResponse.Add(new object[] {reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetInt32(6), reader.GetString(7), reader.GetInt32(8)});
-                        object temp = reader[7];
-                        string channelDesc = temp == null ? null : temp.ToString(); // If description is null, set the variable to null to stop it from erroring.
-                        temp = reader[3];
-                        string guildDesc = temp == null ? null : temp.ToString();
+                    {
+                        string guildDesc = reader[3] == null ? null : reader[3].ToString();
+                        string channelDesc = reader[7] == null ? null : reader[7].ToString(); // If description is null, set the variable to null to stop it from erroring.
                         var responseRow = new
                         {
                             GuildID = reader.GetString(0),
@@ -606,7 +670,7 @@ class MessageServer
             responseMessage = guildsJson;
             code = 200;            
         }
-        sendResponse(context, "application/json", code, responseMessage);
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static void apiSetGuildDetails(HttpListenerContext context, Uri uri, string connectionString)
     {
@@ -672,7 +736,7 @@ class MessageServer
             code = 200;
             responseMessage = null;
         }
-        sendResponse(context, "application/json", code, responseMessage);
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static void apiCreateInvite(HttpListenerContext context, Uri uri, string connectionString)
     {
@@ -761,7 +825,7 @@ class MessageServer
             responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 200;
         }
-        sendResponse(context, "application/json", code, responseMessage);
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static string getUserIDFromUsername(string? userName, string connectionString)// Looks up a UserName and returns the asociated UserID
     {
