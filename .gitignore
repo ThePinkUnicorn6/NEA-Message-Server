@@ -57,3 +57,4 @@ data.db
 .vscode/tasks.json
 obj/Debug/net7.0/apphost.exe
 bin/Debug/net7.0/nea server test.exe
+logs/*
