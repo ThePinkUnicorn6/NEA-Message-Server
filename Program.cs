@@ -3,30 +3,39 @@ using System.IO;
 using System.Net;
 using System.Web;
 using System.Text;
-///using System.Text.Json;
 using Newtonsoft.Json;
 using System.Text.Json.Serialization;
 using System.Data.SQLite;
 using System.Security.Cryptography;
+using System.Collections;
+using System.ComponentModel.Design;
+
 class MessageServer
 {
     const string typeJson = "application/json"; // For ease of use when sending a response.
-
+    static readonly string logPath = @"logs\Server_" + DateTime.Now.ToString("yyyy-MM-dd_HH.mm.ss") + ".log"; // Cannot use a const because the time can't be calculated at compilation.
     static void Main(string[] args)
     {
         const string connectionString = "Data Source=data.db; Version=3; New=True; Compress=True;";
+        using (var con = new SQLiteConnection(connectionString)) 
+        {
+            con.Open();
+            log("DEBUG", "Using SQLite version: " + con.ServerVersion);
+        }
         createDB(connectionString);
         const string url = "http://localhost:8080/";// Sets up http server
         HttpListener listener = new HttpListener();
         listener.Prefixes.Add(url);
-        listener.Start(); // Starts http server
+        listener.Start(); 
         Console.WriteLine("Listening for requests on " + url);
+        log("INFO", "Started server at " + url);
         while (true)
         {
             HttpListenerContext context = listener.GetContext();
             Uri uri = new Uri(context.Request.Url.ToString());
+            log("INFO", context.Request.UserHostAddress.ToString() + " accessed " + uri.AbsolutePath.ToString());
             string responseMessage;
-            try
+            try // This try catch should hopefully never run, but if needed it will stop the server from crashing.
             {
                 switch (uri.AbsolutePath) // Calls function used for each api endpoint
                 {
@@ -38,6 +47,7 @@ class MessageServer
                     case "/api/guild/create": apiCreateGuild(context, uri, connectionString); break;
                     case "/api/guild/listGuilds": apiListGuilds(context, uri, connectionString); break;
                     case "/api/guild/setDetails": apiSetGuildDetails(context, uri, connectionString); break;
+                    case "/api/guild/createInvite": apiCreateInvite(context, uri, connectionString); break;
                     case "/api/account/create": apiAddUser(context, uri, connectionString); break;
                     case "/api/account/login": apiLogin(context, uri, connectionString); break;
                     case "/api/account/login/tokenToUserID": apiReturnUserIDFromToken(context, uri, connectionString); break;
@@ -55,20 +65,23 @@ class MessageServer
                     break;
                 }
             }
+
             catch (Exception e)
             {
-                var responseJson = new { error = "Unknown error: " + e.ToString(), errcode = "UNKNOWN" };
+                log("ERROR", "Unknown Error: \n", e);
+                var responseJson = new { error = "Internal Server Error (500)", errcode = "UNKNOWN" };
                 responseMessage = JsonConvert.SerializeObject(responseJson);
                 sendResponse(context, typeJson, 500, responseMessage);
             }
         }
     }
-    static void createDB(string connectionString)//opens connection to SQLite and creates the tables required
+    static void createDB(string connectionString) // Opens connection to SQLite and creates the tables required
     {
         using (var con = new SQLiteConnection(connectionString)) 
         using (var cmd = new SQLiteCommand(con))
         {
             con.Open();
+            cmd.CommandText = "";
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblUsers' (
                 'UserID'        CHAR(36),
                 'UserName'      VARCHAR(20),
@@ -83,7 +96,7 @@ class MessageServer
                 'ChannelID'     CHAR(36),
                 'ChannelName'   VARCHAR(20),
                 'ChannelType'   INTEGER,
-                'ChannelDesc'    VARCHAR(100),
+                'ChannelDesc'   VARCHAR(100),
                 'IsDM'          BOOL,
                 'GuildID'       CHAR(36),
                 PRIMARY KEY('ChannelID')
@@ -91,10 +104,10 @@ class MessageServer
             cmd.ExecuteNonQuery();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblMessages' (
                 'ChannelID'     CHAR(36),
-                'TimeSent'      INT,
+                'TimeSent'      REAL,
                 'MessageID'     CHAR(36),
                 'UserID'        CHAR(36),
-                'MessageText'   VARCHAR(4000),
+                'MessageText'   TEXT,
                 FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID'),
                 FOREIGN KEY('ChannelID') REFERENCES 'tblChannels'('ChannelID'),
                 PRIMARY KEY('MessageID')
@@ -133,9 +146,15 @@ class MessageServer
                 FOREIGN KEY('OwnerID') REFERENCES 'tblUsers'('UserID')
             );";
             cmd.ExecuteNonQuery();
+            cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblInvites' (
+                'Code'          CHAR(8),
+                'GuildID'       CHAR(36),
+                PRIMARY KEY('Code'),
+                FOREIGN KEY('GuildID') REFERENCES 'tblGuilds'('GuildID')
+            );";
         }
     }
-    static void sendResponse(HttpListenerContext context, string type, int code, string? responseMessage = null) //sends data in response to a call from a client
+    static void sendResponse(HttpListenerContext context, string type, int code, string? responseMessage = null) // Sends data in response to a call from a client
     {
         if (string.IsNullOrEmpty(responseMessage))
         {
@@ -159,13 +178,36 @@ class MessageServer
     {
         return Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(plaintext)));
     }
-    static void apiGetMessages(HttpListenerContext context, Uri uri, string connectionString)//Fetches message data from db if user has permission, and returns it as a json array.
+    static void log(string type, string desc, Exception ex = null)
+    {
+        string time = DateTime.Now.ToString("MM/dd HH:mm:ss.fff");
+        if(!Directory.Exists("logs"))
+        {
+            Directory.CreateDirectory("logs");
+        }
+        switch (type)
+        {
+            case "ERROR":
+            {
+                File.AppendAllText(logPath, time + " [!ERROR] " + desc + ex.ToString() + "\n\n");
+            }break;
+            case "INFO":
+            {
+                File.AppendAllText(logPath, time + " [INFO]   " + desc + "\n");
+            }break;
+            case "DEBUG":
+            {
+                File.AppendAllText(logPath, time + " [DEBUG]  " + desc + "\n");
+            }break;
+        }
+    }
+    static void apiGetMessages(HttpListenerContext context, Uri uri, string connectionString) // Fetches message data from db if user has permission, and returns it as a json array.
     {
         List<Message> messages = new List<Message>();
         int code;
         string responseMessage = "";
         string? channelID = context.Request.QueryString["channelID"];
-        string? offset = context.Request.QueryString["offset"];
+        string? afterMessageID = context.Request.QueryString["afterMessageID"];
         string? token = context.Request.QueryString["token"];
         if (string.IsNullOrEmpty(channelID) | string.IsNullOrEmpty(token)) // If missing a perameter respond with an error
         {
@@ -173,42 +215,70 @@ class MessageServer
             responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 400;
         }
-
-        //TODO: Add authentication.
-
+        else if (!tokenValid(token, connectionString))
+        {
+            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 401;
+        }
         else
         {
-            if (string.IsNullOrEmpty(offset)) offset = "0";
-            using (var con = new SQLiteConnection(connectionString))
-            using (var cmd = new SQLiteCommand(con))
+            string userID = getUserIDFromToken(token, connectionString);
+            if (checkUserChannelPerms(connectionString, channelID, userID) > 0)
             {
-                con.Open();
-                cmd.CommandText = @"SELECT tblUsers.UserID, UserName, MessageID, TimeSent, MessageText
-                                    FROM tblMessages, tblUsers, tblChannels
-                                    WHERE tblChannels.ChannelID = @ChannelID
-                                    AND tblMessages.UserID = tblUsers.UserID
-                                    LIMIT 50 OFFSET @offset;";
-                cmd.Parameters.AddWithValue("ChannelID", channelID);
-                cmd.Parameters.AddWithValue("offset", offset);
-                using (SQLiteDataReader reader = cmd.ExecuteReader())
+                using (var con = new SQLiteConnection(connectionString))
+                using (var cmd = new SQLiteCommand(con))
                 {
-                    while (reader.Read())
+                    con.Open();
+                    // Will return all messages in a channel if AfterMessageID is not null, otherwise it will return only the messages after the message specified.
+                    cmd.CommandText = @"SELECT tblUsers.UserID, UserName, MessageID, TimeSent, MessageText 
+                                        FROM tblMessages, tblUsers
+                                        WHERE tblMessages.ChannelID = @ChannelID
+                                        AND tblMessages.UserID = tblUsers.UserID
+                                        AND 
+                                        (
+                                            CASE 
+                                                WHEN @AfterMessageID IS NOT NULL AND tblMessages.TimeSent > (
+                                                    SELECT TimeSent
+                                                    FROM tblMessages
+                                                    WHERE MessageID = @AfterMessageID
+                                                )
+                                                OR @AfterMessageID IS NULL
+                                                THEN true
+                                                ELSE false
+                                            END
+                                        )
+                                        LIMIT 50;"; 
+                    cmd.Parameters.AddWithValue("AfterMessageID", afterMessageID);
+                    cmd.Parameters.AddWithValue("ChannelID", channelID);
+                    using (SQLiteDataReader reader = cmd.ExecuteReader())
                     {
-                        Message responseRow = new Message
+                        while (reader.Read()) // Loops through each message and adds it to the message list
                         {
-                            UserID = reader.GetString(0),
-                            UserName = reader.GetString(1),
-                            MessageID = reader.GetString(2),
-                            TimeSent = reader.GetInt32(3).ToString(),
-                            MessageText = reader.GetString(4)
-                        };
-                        messages.Add(responseRow);
+                            Message responseRow = new Message
+                            {
+                                UserID = reader.GetString(0),
+                                UserName = reader.GetString(1),
+                                ID = reader.GetString(2),
+                                ChannelID = channelID,
+                                Time = reader.GetDouble(3),
+                                Text = reader.GetString(4)
+                            };
+                            messages.Add(responseRow);
+                        }
                     }
                 }
             }
+            else
+            {
+                var responseJson = new { error = "You do not have permission to read messages in this channel", errcode = "FORBIDDEN" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 403;
+            }
+
             int i = 0;
             responseMessage += "[";
-            foreach (Message message in messages)
+            foreach (Message message in messages) // Assembles the messages into JSON
             {
                 string messageJson = JsonConvert.SerializeObject(message);
                 responseMessage += messageJson;
@@ -226,13 +296,16 @@ class MessageServer
     }
     static void apiSendMessage(HttpListenerContext context, Uri uri, string connectionString)
     {
-        string? channelID = context.Request.QueryString["channelID"];
-        string? messageText = context.Request.QueryString["messageText"];
+        Message message = new Message
+        {
+            ID = Guid.NewGuid().ToString(),
+            ChannelID = context.Request.QueryString["channelID"],
+            Text = context.Request.QueryString["messageText"],
+        };
         string? token = context.Request.QueryString["token"];
-        string messageID = Guid.NewGuid().ToString();
         int code;
         string? responseMessage;
-        if (string.IsNullOrEmpty(channelID) | string.IsNullOrEmpty(messageText) | string.IsNullOrEmpty(token))
+        if (string.IsNullOrEmpty(message.ChannelID) | string.IsNullOrEmpty(message.Text) | string.IsNullOrEmpty(token))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
             responseMessage = JsonConvert.SerializeObject(responseJson);
@@ -246,8 +319,8 @@ class MessageServer
         }
         else
         {
-            string userID = getUserIDFromToken(token, connectionString);
-            if (checkUserAccess(connectionString, channelID, userID) == true)
+            message.UserID = getUserIDFromToken(token, connectionString);
+            if (checkUserChannelPerms(connectionString, message.ChannelID, message.UserID) > 0)
             {
                 // TODO: check user permissions and channel type
                 using (var con = new SQLiteConnection(connectionString))
@@ -255,13 +328,24 @@ class MessageServer
                 {
                     con.Open();
                     cmd.CommandText = @"INSERT INTO tblMessages (ChannelID, TimeSent, MessageID, UserID, MessageText)
-                                        VALUES (@ChannelID, strftime('%s','now'), @MessageID, @UserID, @MessageText);";
-                    cmd.Parameters.AddWithValue("ChannelID", channelID);
-                    cmd.Parameters.AddWithValue("MessageID", messageID);
-                    cmd.Parameters.AddWithValue("UserID", userID);
-                    cmd.Parameters.AddWithValue("MessageText", messageText);
+                                        VALUES (@ChannelID, unixepoch('subsec'), @MessageID, @UserID, @MessageText);";
+                    cmd.Parameters.AddWithValue("ChannelID", message.ChannelID);
+                    cmd.Parameters.AddWithValue("MessageID", message.ID);
+                    cmd.Parameters.AddWithValue("UserID", message.UserID);
+                    cmd.Parameters.AddWithValue("MessageText", message.Text);
                     cmd.ExecuteNonQuery();
-                    responseMessage = null;
+                    cmd.CommandText = @"SELECT Username
+                                        FROM tblUsers
+                                        WHERE UserID = @UserID";
+                    cmd.Parameters.AddWithValue("UserID", message.UserID);
+                    message.UserName = (string)cmd.ExecuteScalar();
+                    cmd.CommandText = @"SELECT TimeSent
+                                        FROM tblMessages
+                                        WHERE MessageID = @MessageID";
+                    cmd.Parameters.AddWithValue("MessageID", message.ID);
+                    message.Time = (Double)cmd.ExecuteScalar();
+
+                    responseMessage = JsonConvert.SerializeObject(message);
                     code = 200;
                 }
             }
@@ -274,10 +358,12 @@ class MessageServer
         }
         sendResponse(context, typeJson, code, responseMessage);
     }
-
-    private static bool checkUserAccess(string connectionString, string? channelID, string userID)
+    private static int checkUserChannelPerms(string connectionString, string channelID, string userID) // Gets the permissions of the user. 0 is not in channel, 1 is a normal user, 2 is administrator, 3 is owner.
     {
-        bool hasPermission;
+        // TODO: finish this
+        bool inChannel;
+        bool isAdmin;
+        bool isOwner = false;
         using (var con = new SQLiteConnection(connectionString))
         using (var cmd = new SQLiteCommand(con))
         {
@@ -285,19 +371,39 @@ class MessageServer
             cmd.CommandText = @"SELECT EXISTS(
                                     SELECT 1
                                     FROM tblGuildConnections, tblGuilds, tblChannels
-                                    WHERE tblGuildConnections.UserID = @UserID AND tblGuildConnections.GuildID = tblChannels.GuildID AND tblChannels.ChannelID = @ChannelID
+                                    WHERE tblGuildConnections.UserID = @UserID 
+                                    AND tblGuildConnections.GuildID = tblChannels.GuildID 
+                                    AND tblChannels.ChannelID = @ChannelID
+
                                     UNION
-                                    SELECT 1 
+
+                                    SELECT 1
                                     FROM tblDMConnections, tblChannels
-                                    WHERE tblDMConnections.UserID = @UserID AND tblDMConnections.ChannelID = @ChannelID
-                                    );"; // Checks if user is in a guild or private [channel
+                                    WHERE tblDMConnections.UserID = @UserID 
+                                    AND tblDMConnections.ChannelID = @ChannelID
+                                    );";  // Returns true if user is in the supplied Channel or DM
             cmd.Parameters.AddWithValue("UserID", userID);
             cmd.Parameters.AddWithValue("ChannelID", channelID);
-            hasPermission = (Int64)cmd.ExecuteScalar() > 0; //Convert integer 1 or 0 into boolean
-        }
-        return hasPermission;
-    }
+            inChannel = (Int64)cmd.ExecuteScalar() > 0; //Convert integer 1 or 0 into boolean
+            if (!inChannel) {return 0;}
 
+            cmd.CommandText = @"SELECT Admin
+                                FROM tblGuildConnections
+                                JOIN tblGuilds ON tblGuilds.GuildID=tblGuildConnections.GuildID
+                                JOIN tblChannels ON tblChannels.GuildID=tblGuilds.GuildID
+                                WHERE UserID = '7ee8c1f5-6e6d-4647-a232-293b3bb0e1dc'
+                                AND ChannelID = 'd29e41ae-1186-4387-b278-ec3940293134'";
+            cmd.Parameters.AddWithValue("UserID", userID);
+            cmd.Parameters.AddWithValue("ChannelID", channelID);
+            isAdmin = (bool)cmd.ExecuteScalar();
+            if (isAdmin) {return 2;}
+            else return 1;
+        }
+        if      (isOwner)  {return 3;}
+        else if (isAdmin)  {return 2;}
+        else if (inChannel){return 1;}
+        else               {return 0;}
+    }
     static void apiGetUserInfo(HttpListenerContext context, Uri uri, string connectionString)
     {
         string? token = context.Request.QueryString["token"];
@@ -354,13 +460,13 @@ class MessageServer
     }
     static void apiAddUser(HttpListenerContext context, Uri uri, string connectionString)
     {
-        //Checks if user exists before hashing the password and adding it to the database. Will respond with an error if the user allready exists.
+        //Checks if user exists before adding them to the database. Will respond with an error if the user allready exists.
         string responseMessage;
         int code;
         string? userName = context.Request.QueryString["userName"];
-        string? password = context.Request.QueryString["password"];
+        string? passHash = context.Request.QueryString["passHash"];
         string? publicKey = context.Request.QueryString["publicKey"];
-        if (string.IsNullOrEmpty(userName) | string.IsNullOrEmpty(publicKey) | string.IsNullOrEmpty(password))
+        if (string.IsNullOrEmpty(userName) | string.IsNullOrEmpty(publicKey) | string.IsNullOrEmpty(passHash))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
             responseMessage = JsonConvert.SerializeObject(responseJson);
@@ -388,7 +494,6 @@ class MessageServer
                 }
                 else
                 {
-                    string passHash = hash(password);
                     string userID = Guid.NewGuid().ToString();
                     cmd.CommandText = @"INSERT INTO tblUsers (UserID, UserName, PassHash)
                                         VALUES (@UserID, @UserName, @PassHash)";
@@ -453,7 +558,15 @@ class MessageServer
         string? guildID = context.Request.QueryString["guildID"];
         string? userID2 = getUserIDFromUsername(context.Request.QueryString["userToAdd"], connectionString);
         string? responseMessage;
-        int? channelType = int.Parse(context.Request.QueryString["channelType"]);
+        int? channelType;
+        if (!isDM)
+        {
+            channelType = int.Parse(context.Request.QueryString["channelType"]);
+        }
+        else 
+        {
+            channelType = null;
+        }
         int code;
 
         if (string.IsNullOrEmpty(channelName) | string.IsNullOrEmpty(token) | (isDM & string.IsNullOrEmpty(userID2)) | (!isDM & string.IsNullOrEmpty(guildID)))
@@ -473,9 +586,18 @@ class MessageServer
             string userID1 = getUserIDFromToken(token, connectionString);
             if (isDM)
             {
-                createDM(userID1, userID2, connectionString);
-                responseMessage = null;
-                code = 200;
+                if (userID1 != userID2)
+                {
+                    createDM(userID1, userID2, connectionString);
+                    responseMessage = null;
+                    code = 200;
+                }
+                else
+                {
+                    var responseJson = new { error = "You cannot add yourself to your own DM", errcode = "INVALID_DATA" };
+                    responseMessage = JsonConvert.SerializeObject(responseJson);
+                    code = 400;
+                }
             }
             else
             {
@@ -488,7 +610,7 @@ class MessageServer
                 }
                 else
                 {
-                    var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
+                    var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_DATA" };
                     responseMessage = JsonConvert.SerializeObject(responseJson);
                     code = 400;
                 }
@@ -503,7 +625,7 @@ class MessageServer
         using (var cmd = new SQLiteCommand(con))
         {
             con.Open();
-            cmd.CommandText = @"INSERT INTO tblChannels(ChannelID, ChannelName, ChanelType, IsDM)
+            cmd.CommandText = @"INSERT INTO tblChannels(ChannelID, ChannelName, ChannelType, IsDM)
                                 VALUES (@ChannelID, NULL, 1, 1);";
             cmd.Parameters.AddWithValue("ChannelID", channelID);
             cmd.ExecuteNonQuery();
@@ -740,6 +862,9 @@ class MessageServer
     }
     static void apiCreateInvite(HttpListenerContext context, Uri uri, string connectionString)
     {
+        string? guildID = context.Request.QueryString["guildID"];
+        string? token = context.Request.QueryString["token"];
+
         Random rnd = new Random();
         string inviteCode = "";
         for (int i = 0; i < 8; i++)
@@ -747,6 +872,15 @@ class MessageServer
             inviteCode += ((char)(rnd.Next(1,26) + 64)).ToString();
         }
         // TODO: add invite to db and return it to user
+        using (var con = new SQLiteConnection(connectionString)) 
+        using (var cmd = new SQLiteCommand(con))
+        {
+            con.Open();
+            cmd.CommandText = @"INSERT INTO tblInvites (Code, GuildID)
+                                VALUS (@Code, @GuildID)";
+            cmd.Parameters.AddWithValue("Code", inviteCode);
+            cmd.Parameters.AddWithValue("GuildID", guildID);
+        }
     }
     static string createToken(string userID, string connectionString)// Generates a token that the client can then use to authenticate with
     {
