@@ -60,6 +60,7 @@ class MessageServer
                     case "/api/guild/listGuilds": apiListGuilds(context); break;
                     case "/api/guild/setDetails": apiSetGuildDetails(context); break;
                     case "/api/guild/createInvite": apiCreateInvite(context); break;
+                    case "api/guild/join": apiJoinGuildFromCode(context); break;
                     case "/api/account/create": apiAddUser(context); break;
                     case "/api/account/login": apiLogin(context); break;
                     case "/api/account/login/tokenToUserID": apiReturnUserIDFromToken(context); break;
@@ -954,31 +955,40 @@ class MessageServer
         else 
         {
             string userID = getUserIDFromToken(token);
-            if (checkUserGuildPerms(guildID, userID) !> 0)
+            if (checkUserGuildPerms(guildID, userID) !>= admin) // Have to have admin to create an invite 
             {
-
+                var responseJson = new { error = "You do not have permission to create invites", errcode = "FORBIDDEN" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 403;
             }
-            Random rnd = new Random();
-            string inviteCode = "";
-            for (int i = 0; i < 8; i++)
+            else
             {
-                inviteCode += ((char)(rnd.Next(1,26) + 64)).ToString();
+                Random rnd = new Random();
+                string inviteCode = "";
+                for (int i = 0; i < 8; i++)
+                {
+                    inviteCode += ((char)(rnd.Next(1,26) + 64)).ToString();
+                }
+                using (var con = new SQLiteConnection(connectionString)) 
+                using (var cmd = new SQLiteCommand(con))
+                {
+                    con.Open();
+                    cmd.CommandText = @"INSERT INTO tblInvites (Code, GuildID)
+                                        VALUS (@Code, @GuildID)";
+                    cmd.Parameters.AddWithValue("Code", inviteCode);
+                    cmd.Parameters.AddWithValue("GuildID", guildID);
+                }
+                var responseJson = new { code = inviteCode };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 200;
             }
-            // TODO: add invite to db and return it to user
-            using (var con = new SQLiteConnection(connectionString)) 
-            using (var cmd = new SQLiteCommand(con))
-            {
-                con.Open();
-                cmd.CommandText = @"INSERT INTO tblInvites (Code, GuildID)
-                                    VALUS (@Code, @GuildID)";
-                cmd.Parameters.AddWithValue("Code", inviteCode);
-                cmd.Parameters.AddWithValue("GuildID", guildID);
-            }
-            var responseJson = new { code = inviteCode };
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 200;
+            
         }
         sendResponse(context, typeJson, code, responseMessage);
+    }
+    static void apiJoinGuildFromCode(HttpListenerContext context)
+    {
+
     }
     static string createToken(string userID)// Generates a token that the client can then use to authenticate with
     {
@@ -1006,11 +1016,7 @@ class MessageServer
                                 FROM tblTokens
                                 WHERE Token = @Token;";
             cmd.Parameters.AddWithValue("Token", token);
-            using (SQLiteDataReader reader = cmd.ExecuteReader())
-            {
-                reader.Read();
-                userID = Convert.ToString(reader["UserID"]);
-            }
+            userID = (string)cmd.ExecuteScalar();
         }
         return userID;
     }
@@ -1021,12 +1027,11 @@ class MessageServer
         using (var cmd = new SQLiteCommand(con))
         {
             con.Open();
-            cmd.CommandText = @"
-            SELECT EXISTS(
-                SELECT 1 
-                FROM tblTokens
-                WHERE Token = @Token
-            )";
+            cmd.CommandText = @"SELECT EXISTS(
+                                    SELECT 1 
+                                    FROM tblTokens
+                                    WHERE Token = @Token
+                                )";
             cmd.Parameters.AddWithValue("Token", token);
             valid = (Int64)cmd.ExecuteScalar() > 0;
         }
