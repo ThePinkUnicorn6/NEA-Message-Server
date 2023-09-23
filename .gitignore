@@ -58,3 +58,5 @@ data.db
 obj/Debug/net7.0/apphost.exe
 bin/Debug/net7.0/nea server test.exe
 logs/*
+/.vs
+/obj/Release/net7.0
