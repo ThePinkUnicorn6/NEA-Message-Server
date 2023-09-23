@@ -35,7 +35,8 @@ class MessageServer
             log("DEBUG", "Using SQLite version: " + con.ServerVersion);
         }
         createDB(connectionString);
-        const string url = "http://localhost:8080/";// Sets up http server
+        const string url = "http://localhost:8080/"; // Sets up http server
+        // TODO: log and give error if port is already in use.
         HttpListener listener = new HttpListener();
         listener.Prefixes.Add(url);
         listener.Start(); 
@@ -60,10 +61,10 @@ class MessageServer
                     case "/api/guild/listGuilds": apiListGuilds(context); break;
                     case "/api/guild/setDetails": apiSetGuildDetails(context); break;
                     case "/api/guild/createInvite": apiCreateInvite(context); break;
-                    case "api/guild/join": apiJoinGuildFromCode(context); break;
-                    case "/api/account/create": apiAddUser(context); break;
+                    case "/api/guild/join": apiJoinGuildFromCode(context); break;
+                    case "/api/account/create": apiCreateUser(context); break;
                     case "/api/account/login": apiLogin(context); break;
-                    case "/api/account/login/tokenToUserID": apiReturnUserIDFromToken(context); break;
+                    case "/api/account/tokenToUserID": apiReturnUserIDFromToken(context); break;
                     default:
                     {
                         var responseJson = new
@@ -78,9 +79,9 @@ class MessageServer
                 }
             }
 
-            catch (Exception e)
+            catch (Exception ex)
             {
-                log("ERROR", "Unknown Error: \n", e);
+                log("ERROR", ex.GetType() + "Error: \n", ex);
                 var responseJson = new { error = "Internal Server Error (500)", errcode = "UNKNOWN" };
                 responseMessage = JsonConvert.SerializeObject(responseJson);
                 sendResponse(context, typeJson, 500, responseMessage);
@@ -164,6 +165,7 @@ class MessageServer
                 PRIMARY KEY('Code'),
                 FOREIGN KEY('GuildID') REFERENCES 'tblGuilds'('GuildID')
             );";
+            cmd.ExecuteNonQuery();
         }
     }
     static void sendResponse(HttpListenerContext context, string type, int code, string? responseMessage = null) // Sends data in response to a call from a client
@@ -197,6 +199,7 @@ class MessageServer
         {
             case "ERROR":
             {
+                Console.WriteLine("[!ERROR] " + ex.GetType() + " exeption, see logs for details");
                 File.AppendAllText(logPath, time + " [!ERROR] " + desc + ex.ToString() + "\n\n");
             }break;
             case "INFO":
@@ -525,7 +528,7 @@ class MessageServer
             }
         }
     }
-    static void apiAddUser(HttpListenerContext context)
+    static void apiCreateUser(HttpListenerContext context)
     {
         //Checks if user exists before adding them to the database. Will respond with an error if the user allready exists.
         string responseMessage;
@@ -757,20 +760,30 @@ class MessageServer
                                     VALUES (@GuildID, @GuildName, @OwnerID);";
                 cmd.Parameters.AddWithValue("GuildID", guildID);
                 cmd.Parameters.AddWithValue("GuildName", guildName);
-                cmd.Parameters.AddWithValue("@OwnerID", userID);
-                cmd.ExecuteNonQuery();
-                cmd.CommandText = @"INSERT INTO tblGuildConnections(UserID, GuildID, Admin)
-                                    VALUES (@UserID, @GuildID, 1);";
-                cmd.Parameters.AddWithValue("UserID", userID);
-                cmd.Parameters.AddWithValue("GuildID", guildID);
+                cmd.Parameters.AddWithValue("OwnerID", userID);
                 cmd.ExecuteNonQuery();
             }
+            addUserToGuild(userID, guildID, true);
             createChannel("General", guildID, 1);
             var responseJson = new { GuildID = guildID};
             responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 200;
         }
         sendResponse(context, typeJson, code, responseMessage);
+    }
+    static void addUserToGuild(string userID, string guildID, bool isAdmin = false)
+    {
+        using (var con = new SQLiteConnection(connectionString))
+        using (var cmd = new SQLiteCommand(con))
+        {
+            con.Open();
+            cmd.CommandText = @"INSERT INTO tblGuildConnections(UserID, GuildID, Admin)
+                                VALUES (@UserID, @GuildID, @Admin);";
+            cmd.Parameters.AddWithValue("UserID", userID);
+            cmd.Parameters.AddWithValue("GuildID", guildID);
+            cmd.Parameters.AddWithValue("Admin", isAdmin);
+            cmd.ExecuteNonQuery();
+        }
     }
     static void apiListGuilds(HttpListenerContext context) // Returns all guilds the user is part of, and the channels in each guild.
     {
@@ -955,7 +968,7 @@ class MessageServer
         else 
         {
             string userID = getUserIDFromToken(token);
-            if (checkUserGuildPerms(guildID, userID) !>= admin) // Have to have admin to create an invite 
+            if (checkUserGuildPerms(guildID, userID) !>= admin) // Have to have admin permissions to create an invite 
             {
                 var responseJson = new { error = "You do not have permission to create invites", errcode = "FORBIDDEN" };
                 responseMessage = JsonConvert.SerializeObject(responseJson);
@@ -974,7 +987,7 @@ class MessageServer
                 {
                     con.Open();
                     cmd.CommandText = @"INSERT INTO tblInvites (Code, GuildID)
-                                        VALUS (@Code, @GuildID)";
+                                        VALUES (@Code, @GuildID);";
                     cmd.Parameters.AddWithValue("Code", inviteCode);
                     cmd.Parameters.AddWithValue("GuildID", guildID);
                 }
@@ -982,13 +995,56 @@ class MessageServer
                 responseMessage = JsonConvert.SerializeObject(responseJson);
                 code = 200;
             }
-            
         }
         sendResponse(context, typeJson, code, responseMessage);
     }
     static void apiJoinGuildFromCode(HttpListenerContext context)
     {
+        string? inviteCode = context.Request.QueryString["code"];
+        string? token = context.Request.QueryString["token"];
+        string responseMessage;
+        int code;
 
+        if (string.IsNullOrEmpty(inviteCode) | string.IsNullOrEmpty(token))
+        {
+            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 400;
+        }
+        else if (!tokenValid(token))
+        {
+            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 401;
+        }
+        else 
+        {
+            using (var con = new SQLiteConnection(connectionString))
+            using (var cmd = new SQLiteCommand(con))
+            {
+                con.Open();
+                cmd.CommandText = @"SELECT GuildID
+                                    FROM tblInvites
+                                    WHERE Code = @Code;";
+                cmd.Parameters.AddWithValue("Code", inviteCode);
+                object result = cmd.ExecuteScalar();
+                if (result != null)
+                {
+                    string guildID = (string)result;
+                    string userID = getUserIDFromToken(token);
+                    addUserToGuild(userID, guildID);
+                    responseMessage = null;
+                    code = 200;
+                }
+                else 
+                {
+                    var responseJson = new { error = "Invalid invite code", errcode = "INVALID_INVITE"};
+                    responseMessage = JsonConvert.SerializeObject(responseJson);
+                    code = 400;
+                }
+                sendResponse(context, typeJson, code, responseMessage);
+            }
+        }
     }
     static string createToken(string userID)// Generates a token that the client can then use to authenticate with
     {
