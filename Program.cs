@@ -382,6 +382,7 @@ class MessageServer
         using (var cmd = new SQLiteCommand(con))
         {
             con.Open();
+            // Check if ser is in guild
             cmd.CommandText = @"SELECT EXISTS(
                                     SELECT 1 
                                     FROM tblGuildConnections
@@ -393,13 +394,15 @@ class MessageServer
             bool inGuild = (Int64)cmd.ExecuteScalar() > 0;
             if (!inGuild) {return notInGuild;}
 
+            // Check if user is the owner
             cmd.CommandText = @"SELECT OwnerID
                                 FROM tblGuilds
                                 WHERE GuildID = @GuildID;";
             cmd.Parameters.AddWithValue("GuildID", guildID);
             bool isOwner = (string)cmd.ExecuteScalar() == userID;
-            if (isOwner) {return admin;}
+            if (isOwner) {return owner;}
 
+            // Check if user has admin 
             cmd.CommandText = @"SELECT Admin
                                 FROM tblGuildConnections
                                 JOIN tblGuilds ON tblGuilds.GuildID = tblGuildConnections.GuildID
@@ -408,8 +411,10 @@ class MessageServer
             cmd.Parameters.AddWithValue("UserID", userID);
             cmd.Parameters.AddWithValue("GuildID", guildID);
             bool isAdmin = (bool)cmd.ExecuteScalar();
-            if (isAdmin) {return unprivileged;}
-            return notInGuild; 
+            if (isAdmin) {return admin;}
+
+            // If the user is in the guild and is not the owner of an admin then the user has no extra permissions.
+            return unprivileged; 
         }
     }
     private static int checkUserChannelPerms(string channelID, string userID) // Gets the permissions of the user. 0 is not in channel, 1 is a read only channel, 2 is a normal user, 3 is administrator, 4 is owner.
@@ -968,7 +973,7 @@ class MessageServer
         else 
         {
             string userID = getUserIDFromToken(token);
-            if (checkUserGuildPerms(guildID, userID) !>= admin) // Have to have admin permissions to create an invite 
+            if (checkUserGuildPerms(guildID, userID) < admin) // Have to have admin permissions to create an invite 
             {
                 var responseJson = new { error = "You do not have permission to create invites", errcode = "FORBIDDEN" };
                 responseMessage = JsonConvert.SerializeObject(responseJson);
