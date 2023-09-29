@@ -60,3 +60,6 @@ bin/Debug/net7.0/nea server test.exe
 logs/*
 /.vs
 /obj/Release/net7.0
+Program.cs
+bin/Debug/net7.0/logs/*
+
