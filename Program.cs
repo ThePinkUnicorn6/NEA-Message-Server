@@ -61,6 +61,7 @@ class MessageServer
                     case "/api/guild/listGuilds": apiListGuilds(context); break;
                     case "/api/guild/setDetails": apiSetGuildDetails(context); break;
                     case "/api/guild/createInvite": apiCreateInvite(context); break;
+                    case "/api/guild/listInvites": apiListInvites(context); break;
                     case "/api/guild/join": apiJoinGuildFromCode(context); break;
                     case "/api/account/create": apiCreateUser(context); break;
                     case "/api/account/login": apiLogin(context); break;
@@ -975,7 +976,7 @@ class MessageServer
             string userID = getUserIDFromToken(token);
             if (checkUserGuildPerms(guildID, userID) < admin) // Have to have admin permissions to create an invite 
             {
-                var responseJson = new { error = "You do not have permission to create invites", errcode = "FORBIDDEN" };
+                var responseJson = new { error = "You do not have permission to create invites in this guild", errcode = "FORBIDDEN" };
                 responseMessage = JsonConvert.SerializeObject(responseJson);
                 code = 403;
             }
@@ -995,8 +996,69 @@ class MessageServer
                                         VALUES (@Code, @GuildID);";
                     cmd.Parameters.AddWithValue("Code", inviteCode);
                     cmd.Parameters.AddWithValue("GuildID", guildID);
+                    cmd.ExecuteNonQuery();
                 }
                 var responseJson = new { code = inviteCode };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 200;
+            }
+        }
+        sendResponse(context, typeJson, code, responseMessage);
+    }
+    static void apiListInvites(HttpListenerContext context)
+    {
+        string? guildID = context.Request.QueryString["guildID"];
+        string? token = context.Request.QueryString["token"];
+        string responseMessage;
+        List<string> inviteCodes = new List<string>();
+        int code;
+
+        if (string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(token))
+        {
+            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 400;
+        }
+        else if (!tokenValid(token))
+        {
+            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 401;
+        }
+        else if (!checkGuildExists(guildID))
+        {
+            var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 400;
+        }
+        else 
+        {
+            string userID = getUserIDFromToken(token);
+            if (checkUserGuildPerms(guildID, userID) < admin) // Have to have admin permissions to create an invite 
+            {
+                var responseJson = new { error = "You do not have permission to fetch invites for this guild", errcode = "FORBIDDEN" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 403;
+            }
+            else
+            {
+                using (var con = new SQLiteConnection(connectionString)) 
+                using (var cmd = new SQLiteCommand(con))
+                {
+                    con.Open();
+                    cmd.CommandText = @"SELECT Code
+                                        FROM tblInvites
+                                        WHERE GuildID = @GuildID;";
+                    cmd.Parameters.AddWithValue("GuildID", guildID);
+                    using (SQLiteDataReader reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read()) // Loops through each code and adds it to the code list
+                        {
+                            inviteCodes.Add(reader.GetString(0));
+                        }
+                    }
+                }
+                var responseJson = new { inviteCodes };
                 responseMessage = JsonConvert.SerializeObject(responseJson);
                 code = 200;
             }
