@@ -156,6 +156,7 @@ class MessageServer
                 'GuildName'     VARCHAR(36),
                 'OwnerID'       CHAR(36),
                 'GuildDesc'     VARCHAR(100),
+                'GuildKey'      BLOB,
                 PRIMARY KEY('GuildID'),
                 FOREIGN KEY('OwnerID') REFERENCES 'tblUsers'('UserID')
             );";
@@ -816,7 +817,7 @@ class MessageServer
             using (var cmd = new SQLiteCommand(con))
             {
                 con.Open();
-                cmd.CommandText = @"SELECT tblGuilds.GuildID, GuildName, OwnerID, GuildDesc, ChannelID, ChannelName, ChannelType, ChannelDesc
+                cmd.CommandText = @"SELECT tblGuilds.GuildID, GuildName, OwnerID, GuildDesc, ChannelID, ChannelName, ChannelType, ChannelDesc, GuildKey
                 FROM tblGuilds, tblGuildConnections, tblChannels, tblUsers
                 WHERE tblUsers.UserID = @UserID 
                 AND tblUsers.UserID = tblGuildConnections.UserID
@@ -836,6 +837,7 @@ class MessageServer
                             GuildName = reader.GetString(1),
                             GuildOwnerID = reader.GetString(2),
                             GuildDesc = guildDesc,
+                            GuildKey = (byte[])reader[8],
                             ChannelID = reader.GetString(4),
                             ChannelName = reader.GetString(5),
                             ChannelType = reader.GetInt32(6),
@@ -854,6 +856,7 @@ class MessageServer
                     guildsJson += "\"guildID\": \"" + dbResponse[i].GuildID + "\", ";
                     guildsJson += "\"guildOwnerID\": \"" + dbResponse[i].GuildOwnerID + "\", ";
                     guildsJson += "\"guildDesc\": \"" + dbResponse[i].GuildDesc + "\", ";
+                    guildsJson += "\"guildKey\": \"" + Convert.ToBase64String(dbResponse[i].GuildKey) + "\", ";
                     guildsJson += "\"channels\": [";
                 }
                 guildsJson += "{"; // Build channel array in guilds json array.
