@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.002.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "nea server test", "nea server test.csproj", "{16198995-10E9-4D00-A5E0-1AC63B525837}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "NeaServer", "NeaServer.csproj", "{16198995-10E9-4D00-A5E0-1AC63B525837}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
