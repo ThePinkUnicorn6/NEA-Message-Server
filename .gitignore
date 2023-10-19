@@ -63,3 +63,4 @@ logs/*
 Program.cs
 bin/Debug/net7.0/logs/*
 
+/obj
