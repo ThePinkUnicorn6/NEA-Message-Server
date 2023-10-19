@@ -17,11 +17,11 @@ jobs:
       with:
         dotnet-version: 7.x
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet restore NeaServer.sln
     - name: Build
       run: dotnet build NeaServer.sln --no-restore 
     - name: Test
-      run: dotnet test --no-build --verbosity normal
+      run: dotnet test NeaServer.sln --no-build --verbosity normal
       
     - uses: actions/upload-artifact@v3
       with:
