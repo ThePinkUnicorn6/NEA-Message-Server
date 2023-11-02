@@ -17,9 +17,9 @@ jobs:
       with:
         dotnet-version: 7.x
     - name: Restore dependencies
-      run: dotnet restore NeaServer.csproj
+      run: dotnet restore NeaServer.sln
     - name: Build
-      run: dotnet build NeaServer.csproj --no-restore --self-contained
+      run: dotnet build NeaServer.sln --no-restore --self-contained
       
     - uses: actions/upload-artifact@v3
       with:
