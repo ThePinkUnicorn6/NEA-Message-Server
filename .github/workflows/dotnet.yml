@@ -19,7 +19,7 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore NeaServer.sln
     - name: Build
-      run: dotnet publish NeaServer.sln -c release --no-restore --self-contained
+      run: dotnet build NeaServer.sln --no-restore --self-contained
       
     - uses: actions/upload-artifact@v3
       with:
