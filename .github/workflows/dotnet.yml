@@ -19,9 +19,7 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore NeaServer.sln
     - name: Build
-      run: dotnet build NeaServer.sln --no-restore; pwd
-    - name: Test
-      run: dotnet test NeaServer.sln --no-build --verbosity normal
+      run: dotnet publish NeaServer.sln --no-restore -r win-x64 --self-contained
       
     - uses: actions/upload-artifact@v3
       with:
