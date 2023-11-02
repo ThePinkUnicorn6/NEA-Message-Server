@@ -19,7 +19,7 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore NeaServer.sln
     - name: Build
-      run: dotnet build NeaServer.sln --no-restore; ls /bin/Release/; pwd
+      run: dotnet build NeaServer.sln --no-restore; pwd
     - name: Test
       run: dotnet test NeaServer.sln --no-build --verbosity normal
       
