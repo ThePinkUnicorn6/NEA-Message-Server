@@ -831,13 +831,15 @@ class MessageServer
                     {
                         string guildDesc = reader[3] == null ? null : reader[3].ToString();
                         string channelDesc = reader[7] == null ? null : reader[7].ToString(); // If description is null, set the variable to null to stop it from erroring.
+                        object guildKey = reader[8] == null ? null : reader[8];
+
                         var responseRow = new
                         {
                             GuildID = reader.GetString(0),
                             GuildName = reader.GetString(1),
                             GuildOwnerID = reader.GetString(2),
                             GuildDesc = guildDesc,
-                            GuildKey = (byte[])reader[8],
+                            GuildKey = guildKey,
                             ChannelID = reader.GetString(4),
                             ChannelName = reader.GetString(5),
                             ChannelType = reader.GetInt32(6),
@@ -850,13 +852,17 @@ class MessageServer
             string guildsJson = "[{"; 
             for (int i = 0; i < dbResponse.Count; i++) // Build the json response string
             {
+                string guildKeyHex;
+                if (dbResponse[i].GuildKey == null){ guildKeyHex = null; } 
+                else { guildKeyHex = Convert.ToBase64String(dbResponse[i].GuildKey); };
+                
                 if (i == 0 || dbResponse[i].GuildID != dbResponse[i - 1].GuildID) // If the guildID is different from the previous iteration, start a new guild item in the JSON array.
                 {
                     guildsJson += "\"guildName\": \"" + dbResponse[i].GuildName + "\", ";
                     guildsJson += "\"guildID\": \"" + dbResponse[i].GuildID + "\", ";
                     guildsJson += "\"guildOwnerID\": \"" + dbResponse[i].GuildOwnerID + "\", ";
                     guildsJson += "\"guildDesc\": \"" + dbResponse[i].GuildDesc + "\", ";
-                    guildsJson += "\"guildKey\": \"" + Convert.ToBase64String(dbResponse[i].GuildKey) + "\", ";
+                    guildsJson += "\"guildKey\": \"" + guildKeyHex + "\", ";
                     guildsJson += "\"channels\": [";
                 }
                 guildsJson += "{"; // Build channel array in guilds json array.
