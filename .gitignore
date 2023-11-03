@@ -62,5 +62,5 @@ logs/*
 /obj/Release/net7.0
 Program.cs
 bin/Debug/net7.0/logs/*
-
+bin/*
 /obj
