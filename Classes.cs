@@ -9,6 +9,7 @@ class Message
     public string UserName {get; set;}
     public Double Time {get; set;}
     public string Text {get; set;}
+    public byte[] IV {get; set;}
 }
 class Guild
 {
