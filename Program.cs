@@ -122,6 +122,7 @@ class MessageServer
                 'MessageID'     CHAR(36),
                 'UserID'        CHAR(36),
                 'MessageText'   TEXT,
+                'IV'            BLOB,
                 FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID'),
                 FOREIGN KEY('ChannelID') REFERENCES 'tblChannels'('ChannelID'),
                 PRIMARY KEY('MessageID')
@@ -244,7 +245,7 @@ class MessageServer
                 {
                     con.Open();
                     // Will return all messages in a channel if AfterMessageID is not null, otherwise it will return only the messages after the message specified.
-                    cmd.CommandText = @"SELECT tblUsers.UserID, UserName, MessageID, TimeSent, MessageText 
+                    cmd.CommandText = @"SELECT tblUsers.UserID, UserName, MessageID, TimeSent, MessageText, IV
                                         FROM tblMessages, tblUsers
                                         WHERE tblMessages.ChannelID = @ChannelID
                                         AND tblMessages.UserID = tblUsers.UserID
@@ -264,6 +265,7 @@ class MessageServer
                                         LIMIT 50;"; 
                     cmd.Parameters.AddWithValue("AfterMessageID", afterMessageID);
                     cmd.Parameters.AddWithValue("ChannelID", channelID);
+                    byte iv = 
                     using (SQLiteDataReader reader = cmd.ExecuteReader())
                     {
                         while (reader.Read()) // Loops through each message and adds it to the message list
@@ -275,7 +277,8 @@ class MessageServer
                                 ID = reader.GetString(2),
                                 ChannelID = channelID,
                                 Time = reader.GetDouble(3),
-                                Text = reader.GetString(4)
+                                Text = reader.GetString(4),
+                                IV = iv
                             };
                             messages.Add(responseRow);
                         }
@@ -506,8 +509,8 @@ class MessageServer
             {
                 con.Open();
                 cmd.CommandText = @"SELECT UserID, UserName, Picture, Description
-                FROM tblUsers
-                WHERE UserID = @UserID";
+                                    FROM tblUsers
+                                    WHERE UserID = @UserID";
                 cmd.Parameters.AddWithValue("UserID", requestedUserID);
                 using (SQLiteDataReader reader = cmd.ExecuteReader())
                 {
