@@ -265,11 +265,12 @@ class MessageServer
                                         LIMIT 50;"; 
                     cmd.Parameters.AddWithValue("AfterMessageID", afterMessageID);
                     cmd.Parameters.AddWithValue("ChannelID", channelID);
-                    byte iv = 
+                    
                     using (SQLiteDataReader reader = cmd.ExecuteReader())
                     {
                         while (reader.Read()) // Loops through each message and adds it to the message list
                         {
+                            byte[]? iv = reader[5] == null ? null : (byte[])reader[5];
                             Message responseRow = new Message
                             {
                                 UserID = reader.GetString(0),
