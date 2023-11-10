@@ -122,7 +122,7 @@ class MessageServer
                 'MessageID'     CHAR(36),
                 'UserID'        CHAR(36),
                 'MessageText'   TEXT,
-                'IV'            BLOB,
+                'IV'            CHAR(32),
                 FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID'),
                 FOREIGN KEY('ChannelID') REFERENCES 'tblChannels'('ChannelID'),
                 PRIMARY KEY('MessageID')
@@ -157,7 +157,7 @@ class MessageServer
                 'GuildName'     VARCHAR(36),
                 'OwnerID'       CHAR(36),
                 'GuildDesc'     VARCHAR(100),
-                'GuildKey'      BLOB,
+                'GuildKey'      CHAR(32),
                 PRIMARY KEY('GuildID'),
                 FOREIGN KEY('OwnerID') REFERENCES 'tblUsers'('UserID')
             );";
@@ -270,7 +270,6 @@ class MessageServer
                     {
                         while (reader.Read()) // Loops through each message and adds it to the message list
                         {
-                            byte[]? iv = reader[5] == null ? null : (byte[])reader[5];
                             Message responseRow = new Message
                             {
                                 UserID = reader.GetString(0),
@@ -279,7 +278,7 @@ class MessageServer
                                 ChannelID = channelID,
                                 Time = reader.GetDouble(3),
                                 Text = reader.GetString(4),
-                                IV = iv
+                                IV = reader.GetString(5),
                             };
                             messages.Add(responseRow);
                         }
@@ -318,6 +317,7 @@ class MessageServer
             ID = Guid.NewGuid().ToString(),
             ChannelID = context.Request.QueryString["channelID"],
             Text = context.Request.QueryString["messageText"],
+            IV = context.Request.QueryString["IV"],
         };
         string? token = context.Request.QueryString["token"];
         int code;
@@ -343,12 +343,13 @@ class MessageServer
                 using (var cmd = new SQLiteCommand(con))
                 {
                     con.Open();
-                    cmd.CommandText = @"INSERT INTO tblMessages (ChannelID, TimeSent, MessageID, UserID, MessageText)
-                                        VALUES (@ChannelID, unixepoch('subsec'), @MessageID, @UserID, @MessageText);";
+                    cmd.CommandText = @"INSERT INTO tblMessages (ChannelID, TimeSent, MessageID, UserID, MessageText, IV)
+                                        VALUES (@ChannelID, unixepoch('subsec'), @MessageID, @UserID, @MessageText, @IV);";
                     cmd.Parameters.AddWithValue("ChannelID", message.ChannelID);
                     cmd.Parameters.AddWithValue("MessageID", message.ID);
                     cmd.Parameters.AddWithValue("UserID", message.UserID);
                     cmd.Parameters.AddWithValue("MessageText", message.Text);
+                    cmd.Parameters.AddWithValue("IV", message.IV);
                     cmd.ExecuteNonQuery();
                     cmd.CommandText = @"SELECT Username
                                         FROM tblUsers
@@ -856,17 +857,12 @@ class MessageServer
             string guildsJson = "[{"; 
             for (int i = 0; i < dbResponse.Count; i++) // Build the json response string
             {
-                string guildKeyHex;
-                if (dbResponse[i].GuildKey == null){ guildKeyHex = null; } 
-                else { guildKeyHex = Convert.ToBase64String(dbResponse[i].GuildKey); };
-                
                 if (i == 0 || dbResponse[i].GuildID != dbResponse[i - 1].GuildID) // If the guildID is different from the previous iteration, start a new guild item in the JSON array.
                 {
                     guildsJson += "\"guildName\": \"" + dbResponse[i].GuildName + "\", ";
                     guildsJson += "\"guildID\": \"" + dbResponse[i].GuildID + "\", ";
                     guildsJson += "\"guildOwnerID\": \"" + dbResponse[i].GuildOwnerID + "\", ";
                     guildsJson += "\"guildDesc\": \"" + dbResponse[i].GuildDesc + "\", ";
-                    guildsJson += "\"guildKey\": \"" + guildKeyHex + "\", ";
                     guildsJson += "\"channels\": [";
                 }
                 guildsJson += "{"; // Build channel array in guilds json array.
