@@ -157,7 +157,7 @@ class MessageServer
                 'GuildName'     VARCHAR(36),
                 'OwnerID'       CHAR(36),
                 'GuildDesc'     VARCHAR(100),
-                'GuildKey'      CHAR(32),
+                'GuildKeyDigest' CHAR(32),
                 PRIMARY KEY('GuildID'),
                 FOREIGN KEY('OwnerID') REFERENCES 'tblUsers'('UserID')
             );";
@@ -745,11 +745,12 @@ class MessageServer
     {
         string? guildName = context.Request.QueryString["guildName"];
         string? token = context.Request.QueryString["token"];
+        string? guildKeyDigest = context.Request.QueryString["guildKeyDigest"];
         string guildID = Guid.NewGuid().ToString();
         string responseMessage;
         int code;
 
-        if (string.IsNullOrEmpty(guildName) | string.IsNullOrEmpty(token))
+        if (string.IsNullOrEmpty(guildName) | string.IsNullOrEmpty(guildKeyDigest) | string.IsNullOrEmpty(token))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
             responseMessage = JsonConvert.SerializeObject(responseJson);
@@ -768,11 +769,12 @@ class MessageServer
             using (var cmd = new SQLiteCommand(con))
             {
                 con.Open();
-                cmd.CommandText = @"INSERT INTO tblGuilds(GuildID, GuildName, OwnerID)
-                                    VALUES (@GuildID, @GuildName, @OwnerID);";
+                cmd.CommandText = @"INSERT INTO tblGuilds(GuildID, GuildName, OwnerID, GuildKeyDigest)
+                                    VALUES (@GuildID, @GuildName, @OwnerID, @GuildKeyDigest);";
                 cmd.Parameters.AddWithValue("GuildID", guildID);
                 cmd.Parameters.AddWithValue("GuildName", guildName);
                 cmd.Parameters.AddWithValue("OwnerID", userID);
+                cmd.Parameters.AddWithValue("GuildKeyDigest", guildKeyDigest);
                 cmd.ExecuteNonQuery();
             }
             addUserToGuild(userID, guildID, true);
@@ -822,7 +824,7 @@ class MessageServer
             using (var cmd = new SQLiteCommand(con))
             {
                 con.Open();
-                cmd.CommandText = @"SELECT tblGuilds.GuildID, GuildName, OwnerID, GuildDesc, ChannelID, ChannelName, ChannelType, ChannelDesc, GuildKey
+                cmd.CommandText = @"SELECT tblGuilds.GuildID, GuildName, OwnerID, GuildDesc, ChannelID, ChannelName, ChannelType, ChannelDesc
                 FROM tblGuilds, tblGuildConnections, tblChannels, tblUsers
                 WHERE tblUsers.UserID = @UserID 
                 AND tblUsers.UserID = tblGuildConnections.UserID
@@ -836,7 +838,6 @@ class MessageServer
                     {
                         string guildDesc = reader[3] == null ? null : reader[3].ToString();
                         string channelDesc = reader[7] == null ? null : reader[7].ToString(); // If description is null, set the variable to null to stop it from erroring.
-                        object guildKey = reader[8] == null ? null : reader[8];
 
                         var responseRow = new
                         {
@@ -844,7 +845,6 @@ class MessageServer
                             GuildName = reader.GetString(1),
                             GuildOwnerID = reader.GetString(2),
                             GuildDesc = guildDesc,
-                            GuildKey = guildKey,
                             ChannelID = reader.GetString(4),
                             ChannelName = reader.GetString(5),
                             ChannelType = reader.GetInt32(6),
