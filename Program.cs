@@ -11,6 +11,8 @@ using System.Collections;
 using System.ComponentModel.Design;
 using System.Data.Entity.Infrastructure.Design;
 using System.Buffers;
+using System.Net.Cache;
+using System.Text.Json.Nodes;
 
 class MessageServer
 {
@@ -215,6 +217,23 @@ class MessageServer
             }break;
         }
     }
+    static dynamic parsePost(HttpListenerContext context)
+    {
+        string jsonBody;
+        var request = context.Request;
+        if (request.HttpMethod == "POST" && request.ContentType != null && request.ContentType.Contains(typeJson))
+        {
+            using (var body = request.InputStream)
+            using (var reader = new StreamReader(body, request.ContentEncoding))
+            {
+                jsonBody = reader.ReadToEnd();
+                
+            }
+        }
+        else { jsonBody = null; }
+        dynamic jsonBodyObject = JsonConvert.DeserializeObject<dynamic>(jsonBody);
+        return jsonBodyObject;
+    }
     static void apiGetMessages(HttpListenerContext context) // Fetches message data from db if user has permission, and returns it as a json array.
     {
         List<Message> messages = new List<Message>();
@@ -310,18 +329,33 @@ class MessageServer
 
         sendResponse(context, typeJson, code, responseMessage);
     }
-    static void apiSendMessage(HttpListenerContext context)
+    static async void apiSendMessage(HttpListenerContext context)
     {
-        Message message = new Message
-        {
-            ID = Guid.NewGuid().ToString(),
-            ChannelID = context.Request.QueryString["channelID"],
-            Text = context.Request.QueryString["messageText"],
-            IV = context.Request.QueryString["IV"],
-        };
-        string? token = context.Request.QueryString["token"];
+        Message message;
+        string token;
+        dynamic jsonBodyObject = parsePost(context);
         int code;
         string? responseMessage;
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 400;
+            sendResponse(context, typeJson, code, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            message = new Message
+            {
+                ID = Guid.NewGuid().ToString(),
+                ChannelID = jsonBodyObject.channelID,
+                Text = jsonBodyObject.messageText,
+                IV = jsonBodyObject.iv,
+            };
+        }
+
         if (string.IsNullOrEmpty(message.ChannelID) | string.IsNullOrEmpty(message.Text) | string.IsNullOrEmpty(token))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
@@ -743,6 +777,7 @@ class MessageServer
     }
     static void apiCreateGuild(HttpListenerContext context)
     {
+        
         string? guildName = context.Request.QueryString["guildName"];
         string? token = context.Request.QueryString["token"];
         string? guildKeyDigest = context.Request.QueryString["guildKeyDigest"];
