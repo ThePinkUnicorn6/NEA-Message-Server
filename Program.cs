@@ -54,20 +54,20 @@ class MessageServer
             {
                 switch (uri.AbsolutePath) // Calls function used for each api endpoint
                 {
-                    case "/api/content/getMessages": apiGetMessages(context); break;
-                    case "/api/content/sendMessage": apiSendMessage(context); break;
-                    case "/api/user/getInfo": apiGetUserInfo(context); break;
-                    case "/api/directMessage/create": apiCreateChannel(context, true); break;
-                    case "/api/guild/createChannel": apiCreateChannel(context, false); break;
-                    case "/api/guild/create": apiCreateGuild(context); break;
-                    case "/api/guild/listGuilds": apiListGuilds(context); break;
-                    case "/api/guild/setDetails": apiSetGuildDetails(context); break;
-                    case "/api/guild/createInvite": apiCreateInvite(context); break;
-                    case "/api/guild/listInvites": apiListInvites(context); break;
-                    case "/api/guild/join": apiJoinGuildFromCode(context); break;
-                    case "/api/account/create": apiCreateUser(context); break;
-                    case "/api/account/login": apiLogin(context); break;
-                    case "/api/account/tokenToUserID": apiReturnUserIDFromToken(context); break;
+                    case "/api/content/getMessages": apiGetMessages(context); break; //Get
+                    case "/api/content/sendMessage": apiSendMessage(context); break; //Post
+                    case "/api/user/getInfo": apiGetUserInfo(context); break; //Get
+                    case "/api/directMessage/create": apiCreateChannel(context, true); break; //Post
+                    case "/api/guild/createChannel": apiCreateChannel(context, false); break; //Post
+                    case "/api/guild/create": apiCreateGuild(context); break; //Post
+                    case "/api/guild/listGuilds": apiListGuilds(context); break; //Get
+                    case "/api/guild/setDetails": apiSetGuildDetails(context); break; //Post
+                    case "/api/guild/createInvite": apiCreateInvite(context); break; //Get
+                    case "/api/guild/listInvites": apiListInvites(context); break; //Get
+                    case "/api/guild/join": apiJoinGuildFromCode(context); break; //Get
+                    case "/api/account/create": apiCreateUser(context); break; //Post
+                    case "/api/account/login": apiLogin(context); break; //Post
+                    case "/api/account/tokenToUserID": apiReturnUserIDFromToken(context); break; //Get
                     default:
                     {
                         var responseJson = new
@@ -309,6 +309,8 @@ class MessageServer
                 var responseJson = new { error = "You do not have permission to read messages in this channel", errcode = "FORBIDDEN" };
                 responseMessage = JsonConvert.SerializeObject(responseJson);
                 code = 403;
+                sendResponse(context, typeJson, code, responseMessage);
+                return;
             }
 
             int i = 0;
@@ -329,7 +331,7 @@ class MessageServer
 
         sendResponse(context, typeJson, code, responseMessage);
     }
-    static async void apiSendMessage(HttpListenerContext context)
+    static void apiSendMessage(HttpListenerContext context)
     {
         Message message;
         string token;
@@ -340,8 +342,7 @@ class MessageServer
         {
             var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
             responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
-            sendResponse(context, typeJson, code, responseMessage);
+            sendResponse(context, typeJson, 400, responseMessage);
             return;
         }
         else
@@ -777,14 +778,27 @@ class MessageServer
     }
     static void apiCreateGuild(HttpListenerContext context)
     {
-        
-        string? guildName = context.Request.QueryString["guildName"];
-        string? token = context.Request.QueryString["token"];
-        string? guildKeyDigest = context.Request.QueryString["guildKeyDigest"];
+        string? guildKeyDigest;
         string guildID = Guid.NewGuid().ToString();
         string responseMessage;
         int code;
-
+        string? token;
+        string? guildName;
+        string? guildDesc;
+        dynamic jsonBodyObject = parsePost(context);
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            guildName = jsonBodyObject.guildName;
+            guildKeyDigest = jsonBodyObject.guildKeyDigest;
+        }
         if (string.IsNullOrEmpty(guildName) | string.IsNullOrEmpty(guildKeyDigest) | string.IsNullOrEmpty(token))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
@@ -926,13 +940,27 @@ class MessageServer
     }
     static void apiSetGuildDetails(HttpListenerContext context)
     {
-        string? token = context.Request.QueryString["token"];
-        string? guildID = context.Request.QueryString["guildID"];
-        string? guildName = context.Request.QueryString["guildName"];
-        string? guildDesc = context.Request.QueryString["guildDesc"];
+        string? token;
+        string? guildID;
+        string? guildName;
+        string? guildDesc;
+        dynamic jsonBodyObject = parsePost(context);
         string responseMessage;
         int code;
-
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            guildID = jsonBodyObject.guildID;
+            guildName = jsonBodyObject.guildName;
+            guildDesc = jsonBodyObject.guildDesc;
+        }
         if (string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(token))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
