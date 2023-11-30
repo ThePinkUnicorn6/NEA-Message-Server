@@ -570,10 +570,10 @@ class MessageServer
                         responseMessage = JsonConvert.SerializeObject(user);
                         code = 200;
                     }
-                    sendResponse(context, typeJson, code, responseMessage);
                 }
             }
         }
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static void apiCreateUser(HttpListenerContext context)
     {
@@ -665,8 +665,8 @@ class MessageServer
                     code = 403;
                 }
             }
-            sendResponse(context, typeJson, code, responseMessage);
         }
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static void apiCreateChannel(HttpListenerContext context, bool isDM)
     {
@@ -1020,11 +1020,23 @@ class MessageServer
     }
     static void apiCreateInvite(HttpListenerContext context)
     {
-        string? guildID = context.Request.QueryString["guildID"];
-        string? token = context.Request.QueryString["token"];
-        string responseMessage;
+        string? guildID;
+        string? token;
+        dynamic jsonBodyObject = parsePost(context);
         int code;
-
+        string? responseMessage;
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            guildID = jsonBodyObject.guildID;
+        }
         if (string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(token))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
@@ -1181,9 +1193,9 @@ class MessageServer
                     responseMessage = JsonConvert.SerializeObject(responseJson);
                     code = 400;
                 }
-                sendResponse(context, typeJson, code, responseMessage);
             }
         }
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static string createToken(string userID)// Generates a token that the client can then use to authenticate with
     {
