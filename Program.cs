@@ -64,10 +64,10 @@ class MessageServer
                     case "/api/guild/setDetails": apiSetGuildDetails(context); break; //Post
                     case "/api/guild/createInvite": apiCreateInvite(context); break; //Get
                     case "/api/guild/listInvites": apiListInvites(context); break; //Get
-                    case "/api/guild/join": apiJoinGuildFromCode(context); break; //Get
+                    case "/api/guild/join": apiJoinGuildFromCode(context); break; //Post
                     case "/api/account/create": apiCreateUser(context); break; //Post
                     case "/api/account/login": apiLogin(context); break; //Post
-                    case "/api/account/tokenToUserID": apiReturnUserIDFromToken(context); break; //Get
+                    case "/api/account/userID": apiReturnUserIDFromToken(context); break; //Get
                     default:
                     {
                         var responseJson = new
@@ -580,9 +580,23 @@ class MessageServer
         //Checks if user exists before adding them to the database. Will respond with an error if the user allready exists.
         string responseMessage;
         int code;
-        string? userName = context.Request.QueryString["userName"];
-        string? passHash = context.Request.QueryString["passHash"];
-        string? publicKey = context.Request.QueryString["publicKey"];
+        string? userName;
+        string? passHash;
+        string? publicKey;
+        dynamic jsonBodyObject = parsePost(context);
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            userName = jsonBodyObject.userName;
+            publicKey = jsonBodyObject.publicKey;
+            passHash = jsonBodyObject.passHash;
+        }
         if (string.IsNullOrEmpty(userName) | string.IsNullOrEmpty(publicKey) | string.IsNullOrEmpty(passHash))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
@@ -1151,10 +1165,23 @@ class MessageServer
     }
     static void apiJoinGuildFromCode(HttpListenerContext context)
     {
-        string? inviteCode = context.Request.QueryString["code"];
-        string? token = context.Request.QueryString["token"];
-        string responseMessage;
+        string? inviteCode;
+        string? token;
+        dynamic jsonBodyObject = parsePost(context);
         int code;
+        string? responseMessage;
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            inviteCode = jsonBodyObject.code;
+        }
 
         if (string.IsNullOrEmpty(inviteCode) | string.IsNullOrEmpty(token))
         {
