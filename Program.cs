@@ -1,18 +1,7 @@
-﻿using System;
-using System.IO;
-using System.Net;
-using System.Web;
+﻿using System.Net;
 using System.Text;
 using Newtonsoft.Json;
-using System.Text.Json.Serialization;
 using System.Data.SQLite;
-using System.Security.Cryptography;
-using System.Collections;
-using System.ComponentModel.Design;
-using System.Data.Entity.Infrastructure.Design;
-using System.Buffers;
-using System.Net.Cache;
-using System.Text.Json.Nodes;
 
 class MessageServer
 {
@@ -65,6 +54,7 @@ class MessageServer
                     case "/api/guild/createInvite": apiCreateInvite(context); break; //Get
                     case "/api/guild/listInvites": apiListInvites(context); break; //Get
                     case "/api/guild/join": apiJoinGuildFromCode(context); break; //Post
+                    case "/api/guild/requestKeys": apiRequestKeys(context); break; //Get
                     case "/api/account/create": apiCreateUser(context); break; //Post
                     case "/api/account/login": apiLogin(context); break; //Post
                     case "/api/account/userID": apiReturnUserIDFromToken(context); break; //Get
@@ -175,23 +165,27 @@ class MessageServer
     }
     static void sendResponse(HttpListenerContext context, string type, int code, string? responseMessage = null) // Sends data in response to a call from a client
     {
-        if (string.IsNullOrEmpty(responseMessage))
+        try 
         {
-            context.Response.Headers.Clear();
-            context.Response.StatusCode = code;
-            context.Response.Close();
+            if (string.IsNullOrEmpty(responseMessage))
+            {
+                context.Response.Headers.Clear();
+                context.Response.StatusCode = code;
+                context.Response.Close();
+            }
+            else
+            {
+                byte[] responseBytes = Encoding.UTF8.GetBytes(responseMessage);
+                context.Response.ContentLength64 = responseBytes.Length;
+                context.Response.ContentType = type;
+                context.Response.StatusCode = code;
+                Stream outputStream = context.Response.OutputStream;
+                outputStream.Write(responseBytes, 0, responseBytes.Length);
+                outputStream.Close();
+            }
+            Console.WriteLine("Sent response: " + responseMessage);
         }
-        else
-        {
-            byte[] responseBytes = Encoding.UTF8.GetBytes(responseMessage);
-            context.Response.ContentLength64 = responseBytes.Length;
-            context.Response.ContentType = type;
-            context.Response.StatusCode = code;
-            Stream outputStream = context.Response.OutputStream;
-            outputStream.Write(responseBytes, 0, responseBytes.Length);
-            outputStream.Close();
-        }
-        Console.WriteLine("Sent response: " + responseMessage);
+        catch(Exception ex) { log("ERROR", "Failed to send response", ex); }
     }
     static void log(string type, string desc, Exception ex = null)
     {
@@ -205,21 +199,27 @@ class MessageServer
             case "ERROR":
             {
                 Console.WriteLine("[!ERROR] " + ex.GetType() + " exeption, see logs for details");
-                File.AppendAllText(logPath, time + " [!ERROR] " + desc + ex.ToString() + "\n\n");
+                File.AppendAllText(logPath, time + " [!ERROR]  " + desc + ex.ToString() + "\n\n");
+            }break;
+            case "WARNING":
+            {
+                Console.WriteLine("[WARNING] " + desc);
+                File.AppendAllText(logPath, time + " [WARNING] " + desc + ex.ToString() + "\n\n");
             }break;
             case "INFO":
             {
-                File.AppendAllText(logPath, time + " [INFO]   " + desc + "\n");
+                File.AppendAllText(logPath, time + " [INFO]    " + desc + "\n");
             }break;
             case "DEBUG":
             {
-                File.AppendAllText(logPath, time + " [DEBUG]  " + desc + "\n");
+                File.AppendAllText(logPath, time + " [DEBUG]   " + desc + "\n");
             }break;
         }
     }
     static dynamic parsePost(HttpListenerContext context)
     {
         string jsonBody;
+        dynamic jsonBodyObject;
         var request = context.Request;
         if (request.HttpMethod == "POST" && request.ContentType != null && request.ContentType.Contains(typeJson))
         {
@@ -227,11 +227,10 @@ class MessageServer
             using (var reader = new StreamReader(body, request.ContentEncoding))
             {
                 jsonBody = reader.ReadToEnd();
-                
             }
+            jsonBodyObject = JsonConvert.DeserializeObject<dynamic>(jsonBody);
         }
-        else { jsonBody = null; }
-        dynamic jsonBodyObject = JsonConvert.DeserializeObject<dynamic>(jsonBody);
+        else { jsonBodyObject = null; }
         return jsonBodyObject;
     }
     static void apiGetMessages(HttpListenerContext context) // Fetches message data from db if user has permission, and returns it as a json array.
@@ -577,7 +576,7 @@ class MessageServer
     }
     static void apiCreateUser(HttpListenerContext context)
     {
-        //Checks if user exists before adding them to the database. Will respond with an error if the user allready exists.
+        // Checks if user exists before adding them to the database. Will respond with an error if the user allready exists.
         string responseMessage;
         int code;
         string? userName;
@@ -597,7 +596,7 @@ class MessageServer
             publicKey = jsonBodyObject.publicKey;
             passHash = jsonBodyObject.passHash;
         }
-        if (string.IsNullOrEmpty(userName) | string.IsNullOrEmpty(publicKey) | string.IsNullOrEmpty(passHash))
+        if (string.IsNullOrEmpty(userName) /*| string.IsNullOrEmpty(publicKey)*/ | string.IsNullOrEmpty(passHash))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
             responseMessage = JsonConvert.SerializeObject(responseJson);
@@ -1090,6 +1089,22 @@ class MessageServer
                 using (var cmd = new SQLiteCommand(con))
                 {
                     con.Open();
+                    bool collision = false;
+                    do
+                    {
+                        cmd.CommandText = @"SELECT EXISTS(
+                                                SELECT 1 
+                                                FROM tblInvites
+                                                WHERE Code = @Code
+                                            )";
+                        cmd.Parameters.AddWithValue("Code", inviteCode); 
+                        collision = (Int64)cmd.ExecuteScalar() > 0;
+                        if (collision = true)
+                        {
+                            log("WARNING", "Duplicate invite generated");
+                        }          
+                    } while (collision = true); // If an invite that allready exists is generated create a warning and regenerate it.
+
                     cmd.CommandText = @"INSERT INTO tblInvites (Code, GuildID)
                                         VALUES (@Code, @GuildID);";
                     cmd.Parameters.AddWithValue("Code", inviteCode);
@@ -1223,6 +1238,10 @@ class MessageServer
             }
         }
         sendResponse(context, typeJson, code, responseMessage);
+    }
+    static void apiRequestKeys(HttpListenerContext context)
+    {
+
     }
     static string createToken(string userID)// Generates a token that the client can then use to authenticate with
     {
