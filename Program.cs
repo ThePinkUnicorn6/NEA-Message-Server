@@ -198,7 +198,7 @@ class MessageServer
         {
             case "ERROR":
             {
-                Console.WriteLine("[!ERROR] " + ex.GetType() + " exeption, see logs for details");
+                Console.WriteLine("[!ERROR]" + ex.GetType() + " exeption, see logs for details");
                 File.AppendAllText(logPath, time + " [!ERROR]  " + desc + ex.ToString() + "\n\n");
             }break;
             case "WARNING":
@@ -208,11 +208,11 @@ class MessageServer
             }break;
             case "INFO":
             {
-                File.AppendAllText(logPath, time + " [INFO]    " + desc + "\n");
+                File.AppendAllText(logPath, time + " [INFO]   " + desc + "\n");
             }break;
             case "DEBUG":
             {
-                File.AppendAllText(logPath, time + " [DEBUG]   " + desc + "\n");
+                File.AppendAllText(logPath, time + " [DEBUG]  " + desc + "\n");
             }break;
         }
     }
@@ -448,7 +448,7 @@ class MessageServer
                                 FROM tblGuildConnections
                                 JOIN tblGuilds ON tblGuilds.GuildID = tblGuildConnections.GuildID
                                 WHERE UserID = @UserID
-                                AND GuildID = @GuildID;";
+                                AND tblGuilds.GuildID = @GuildID;";
             cmd.Parameters.AddWithValue("UserID", userID);
             cmd.Parameters.AddWithValue("GuildID", guildID);
             bool isAdmin = (bool)cmd.ExecuteScalar();
@@ -510,7 +510,7 @@ class MessageServer
                                         FROM tblChannels
                                         WHERE ChannelID = @ChannelID";
                     cmd.Parameters.AddWithValue("@ChannelID", channelID);
-                    int channelType = (int)cmd.ExecuteScalar();
+                    Int64 channelType = (Int64)cmd.ExecuteScalar();
                     return channelType == 1 ? readWrite : readOnly; // Return 2 if the channel is read only, 3 if read/write
                 }
                 else
@@ -574,9 +574,8 @@ class MessageServer
         }
         sendResponse(context, typeJson, code, responseMessage);
     }
-    static void apiCreateUser(HttpListenerContext context)
+    static void apiCreateUser(HttpListenerContext context) // Checks if user exists before adding them to the database. Will respond with an error if the user allready exists.
     {
-        // Checks if user exists before adding them to the database. Will respond with an error if the user allready exists.
         string responseMessage;
         int code;
         string? userName;
@@ -613,7 +612,7 @@ class MessageServer
                     SELECT 1 
                     FROM tblUsers
                     WHERE UserName = @UserName
-                )";
+                )"; 
                 cmd.Parameters.AddWithValue("UserName", userName);
                 bool userTaken = (Int64)cmd.ExecuteScalar() > 0;
                 if (userTaken)
@@ -643,8 +642,21 @@ class MessageServer
     {
         string responseMessage;
         int code;
-        string? userName = context.Request.QueryString["userName"];
-        string? passHash = context.Request.QueryString["passHash"];
+        string? userName;
+        string? passHash;
+        dynamic jsonBodyObject = parsePost(context);
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            userName = jsonBodyObject.userName;
+            passHash = jsonBodyObject.passHash;
+        }
         if (string.IsNullOrEmpty(userName) | string.IsNullOrEmpty(passHash))
         {
             var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
@@ -683,12 +695,27 @@ class MessageServer
     }
     static void apiCreateChannel(HttpListenerContext context, bool isDM)
     {
-        string? channelName = context.Request.QueryString["channelName"];
-        string? token = context.Request.QueryString["token"];
-        string? guildID = context.Request.QueryString["guildID"];
-        string? userID2 = getUserIDFromUsername(context.Request.QueryString["userToAdd"]);
+        string? channelName;
+        string? token;
+        string? guildID;
+        string? userID2;
         string? responseMessage;
         int? channelType;
+        dynamic jsonBodyObject = parsePost(context);
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            channelName = jsonBodyObject.channelName;
+            guildID = jsonBodyObject.guildID;
+            userID2 = getUserIDFromUsername(jsonBodyObject.userToAdd);
+        }
         if (!isDM)
         {
             channelType = int.Parse(context.Request.QueryString["channelType"]);
