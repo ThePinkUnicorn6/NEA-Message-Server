@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text;
 using Newtonsoft.Json;
 using System.Data.SQLite;
@@ -54,7 +54,7 @@ class MessageServer
                     case "/api/guild/createInvite": apiCreateInvite(context); break; //Get
                     case "/api/guild/listInvites": apiListInvites(context); break; //Get
                     case "/api/guild/join": apiJoinGuildFromCode(context); break; //Post
-                    case "/api/guild/requestKeys": apiRequestKeys(context); break; //Get
+                    case "/api/guild/requestKey": apiRequestKeys(context); break; //Get
                     case "/api/account/create": apiCreateUser(context); break; //Post
                     case "/api/account/login": apiLogin(context); break; //Post
                     case "/api/account/userID": apiReturnUserIDFromToken(context); break; //Get
@@ -135,7 +135,7 @@ class MessageServer
                 FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID'),
                 FOREIGN KEY('ChannelID') REFERENCES 'tblChannels'('ChannelID'),
                 PRIMARY KEY('UserID', 'ChannelID')
-            )";
+            );";
             cmd.ExecuteNonQuery();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblTokens' (
                 'Token'         CHAR(36),
@@ -198,13 +198,13 @@ class MessageServer
         {
             case "ERROR":
             {
-                Console.WriteLine("[!ERROR]" + ex.GetType() + " exeption, see logs for details");
+                Console.WriteLine("[!ERROR] " + ex.GetType() + " exeption, see logs for details");
                 File.AppendAllText(logPath, time + " [!ERROR]  " + desc + ex.ToString() + "\n\n");
             }break;
             case "WARNING":
             {
                 Console.WriteLine("[WARNING] " + desc);
-                File.AppendAllText(logPath, time + " [WARNING] " + desc + ex.ToString() + "\n\n");
+                File.AppendAllText(logPath, time + " [WARNING] " + desc + "\n\n");
             }break;
             case "INFO":
             {
@@ -233,6 +233,18 @@ class MessageServer
         else { jsonBodyObject = null; }
         return jsonBodyObject;
     }
+    static void returnInvalidTokenError(out string responseMessage, out int code)
+    {
+        var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
+        responseMessage = JsonConvert.SerializeObject(responseJson);
+        code = 401;
+    }
+    static void returnMissingParameterError(out string responseMessage, out int code)
+    {
+        var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
+        responseMessage = JsonConvert.SerializeObject(responseJson);
+        code = 400;
+    }
     static void apiGetMessages(HttpListenerContext context) // Fetches message data from db if user has permission, and returns it as a json array.
     {
         List<Message> messages = new List<Message>();
@@ -241,18 +253,8 @@ class MessageServer
         string? channelID = context.Request.QueryString["channelID"];
         string? afterMessageID = context.Request.QueryString["afterMessageID"];
         string? token = context.Request.QueryString["token"];
-        if (string.IsNullOrEmpty(channelID) | string.IsNullOrEmpty(token)) // If missing a perameter respond with an error
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
-        }
-        else if (!tokenValid(token))
-        {
-            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 401;
-        }
+        if (string.IsNullOrEmpty(channelID) | string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code);
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else
         {
             string userID = getUserIDFromToken(token);
@@ -355,19 +357,9 @@ class MessageServer
                 IV = jsonBodyObject.iv,
             };
         }
-
         if (string.IsNullOrEmpty(message.ChannelID) | string.IsNullOrEmpty(message.Text) | string.IsNullOrEmpty(token))
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
-        }        
-        else if (!tokenValid(token))
-        {
-            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 401;
-        }
+            {returnMissingParameterError(out responseMessage, out code);}
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else
         {
             message.UserID = getUserIDFromToken(token);
@@ -526,18 +518,8 @@ class MessageServer
         string? requestedUserID = context.Request.QueryString["userID"];
         int code;
         string responseMessage;
-        if (string.IsNullOrEmpty(token) | string.IsNullOrEmpty(requestedUserID))
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
-        }        
-        else if (!tokenValid(token))
-        {
-            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 401;
-        }
+        if (string.IsNullOrEmpty(token) | string.IsNullOrEmpty(requestedUserID)) returnMissingParameterError(out responseMessage, out code);
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code); 
         else
         {
             using (var con = new SQLiteConnection(connectionString))
@@ -595,11 +577,8 @@ class MessageServer
             publicKey = jsonBodyObject.publicKey;
             passHash = jsonBodyObject.passHash;
         }
-        if (string.IsNullOrEmpty(userName) /*| string.IsNullOrEmpty(publicKey)*/ | string.IsNullOrEmpty(passHash))
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
+        if (string.IsNullOrEmpty(userName) | string.IsNullOrEmpty(publicKey) | string.IsNullOrEmpty(passHash)) {
+            returnMissingParameterError(out responseMessage, out code); 
         }
         else
         {
@@ -657,12 +636,7 @@ class MessageServer
             userName = jsonBodyObject.userName;
             passHash = jsonBodyObject.passHash;
         }
-        if (string.IsNullOrEmpty(userName) | string.IsNullOrEmpty(passHash))
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
-        }
+        if (string.IsNullOrEmpty(userName) | string.IsNullOrEmpty(passHash)) returnMissingParameterError(out responseMessage, out code);
         else
         {
             using (var con = new SQLiteConnection(connectionString))
@@ -718,7 +692,7 @@ class MessageServer
         }
         if (!isDM)
         {
-            channelType = int.Parse(context.Request.QueryString["channelType"]);
+            channelType = int.Parse(jsonBodyObject.channelType);
         }
         else 
         {
@@ -726,18 +700,10 @@ class MessageServer
         }
         int code;
 
-        if (string.IsNullOrEmpty(channelName) | string.IsNullOrEmpty(token) | (isDM & string.IsNullOrEmpty(userID2)) | (!isDM & string.IsNullOrEmpty(guildID)))
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
+        if (string.IsNullOrEmpty(channelName) | string.IsNullOrEmpty(token) | (isDM & string.IsNullOrEmpty(userID2)) | (!isDM & string.IsNullOrEmpty(guildID))) {
+            returnMissingParameterError(out responseMessage, out code); 
         }
-        else if (!tokenValid(token))
-        {
-            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 401;
-        }
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else
         {
             string userID1 = getUserIDFromToken(token);
@@ -839,18 +805,10 @@ class MessageServer
             guildName = jsonBodyObject.guildName;
             guildKeyDigest = jsonBodyObject.guildKeyDigest;
         }
-        if (string.IsNullOrEmpty(guildName) | string.IsNullOrEmpty(guildKeyDigest) | string.IsNullOrEmpty(token))
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
+        if (string.IsNullOrEmpty(guildName) | string.IsNullOrEmpty(guildKeyDigest) | string.IsNullOrEmpty(token)) {
+            returnMissingParameterError(out responseMessage, out code); 
         }
-        else if (!tokenValid(token))
-        {
-            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 401;
-        }
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else 
         {
             string userID = getUserIDFromToken(token);
@@ -893,18 +851,8 @@ class MessageServer
         string? token = context.Request.QueryString["token"];
         string responseMessage;
         int code;
-        if (string.IsNullOrEmpty(token))
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
-        }
-        else if (!tokenValid(token))
-        {
-            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 401;
-        }
+        if (string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code); 
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else 
         {
             List<dynamic> dbResponse = new List<dynamic>{};
@@ -1001,18 +949,8 @@ class MessageServer
             guildName = jsonBodyObject.guildName;
             guildDesc = jsonBodyObject.guildDesc;
         }
-        if (string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(token))
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
-        }
-        else if (!tokenValid(token))
-        {
-            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 401;
-        }
+        if (string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code); 
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else if (!checkGuildExists(guildID))
         {
             var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
@@ -1077,18 +1015,8 @@ class MessageServer
             token = jsonBodyObject.token;
             guildID = jsonBodyObject.guildID;
         }
-        if (string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(token))
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
-        }
-        else if (!tokenValid(token))
-        {
-            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 401;
-        }
+        if (string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code);
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else if (!checkGuildExists(guildID))
         {
             var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
@@ -1126,11 +1054,11 @@ class MessageServer
                                             )";
                         cmd.Parameters.AddWithValue("Code", inviteCode); 
                         collision = (Int64)cmd.ExecuteScalar() > 0;
-                        if (collision = true)
+                        if (collision == true)
                         {
                             log("WARNING", "Duplicate invite generated");
                         }          
-                    } while (collision = true); // If an invite that allready exists is generated create a warning and regenerate it.
+                    } while (collision == true); // If an invite that allready exists is generated create a warning and regenerate it.
 
                     cmd.CommandText = @"INSERT INTO tblInvites (Code, GuildID)
                                         VALUES (@Code, @GuildID);";
@@ -1153,18 +1081,8 @@ class MessageServer
         List<string> inviteCodes = new List<string>();
         int code;
 
-        if (string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(token))
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
-        }
-        else if (!tokenValid(token))
-        {
-            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 401;
-        }
+        if (string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code); 
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else if (!checkGuildExists(guildID))
         {
             var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
@@ -1225,20 +1143,11 @@ class MessageServer
             inviteCode = jsonBodyObject.code;
         }
 
-        if (string.IsNullOrEmpty(inviteCode) | string.IsNullOrEmpty(token))
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
-        }
-        else if (!tokenValid(token))
-        {
-            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 401;
-        }
+        if (string.IsNullOrEmpty(inviteCode) | string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code); 
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else 
         {
+            object result;
             using (var con = new SQLiteConnection(connectionString))
             using (var cmd = new SQLiteCommand(con))
             {
@@ -1247,7 +1156,8 @@ class MessageServer
                                     FROM tblInvites
                                     WHERE Code = @Code;";
                 cmd.Parameters.AddWithValue("Code", inviteCode);
-                object result = cmd.ExecuteScalar();
+                result = cmd.ExecuteScalar();
+            }    
                 if (result != null)
                 {
                     string guildID = (string)result;
@@ -1261,7 +1171,6 @@ class MessageServer
                     var responseJson = new { error = "Invalid invite code", errcode = "INVALID_INVITE"};
                     responseMessage = JsonConvert.SerializeObject(responseJson);
                     code = 400;
-                }
             }
         }
         sendResponse(context, typeJson, code, responseMessage);
@@ -1323,18 +1232,8 @@ class MessageServer
         string userID;
         string responseMessage;
         int code;
-        if (string.IsNullOrEmpty(token))
-        {
-            var responseJson = new { error = "Missing a required parameter", errcode = "MISSING_PARAMETER"};
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 400;
-        }
-        else if (!tokenValid(token))
-        {
-            var responseJson = new { error = "Invalid token", errcode = "INVALID_TOKEN" };
-            responseMessage = JsonConvert.SerializeObject(responseJson);
-            code = 401;
-        }
+        if (string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code);
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else
         {
             userID = getUserIDFromToken(token);
