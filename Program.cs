@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using Newtonsoft.Json;
 using System.Data.SQLite;
@@ -152,6 +152,14 @@ class MessageServer
                 'GuildKeyDigest' CHAR(32),
                 PRIMARY KEY('GuildID'),
                 FOREIGN KEY('OwnerID') REFERENCES 'tblUsers'('UserID')
+            );";
+            cmd.ExecuteNonQuery();
+            cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblKeyRequests' (
+                'UserID'        CHAR(36),
+                'GuildID'       CHAR(36),
+                FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID'),
+                FOREIGN KEY('GuildID') REFERENCES 'tblGuilds'('GuildID'),
+                PRIMARY KEY('UserID', 'GuildID')
             );";
             cmd.ExecuteNonQuery();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblInvites' (
@@ -357,7 +365,7 @@ class MessageServer
                 IV = jsonBodyObject.iv,
             };
         }
-        if (string.IsNullOrEmpty(message.ChannelID) | string.IsNullOrEmpty(message.Text) | string.IsNullOrEmpty(token))
+        if (string.IsNullOrEmpty(message.ChannelID) | string.IsNullOrEmpty(message.Text) | string.IsNullOrEmpty(token)) 
             {returnMissingParameterError(out responseMessage, out code);}
         else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else
@@ -1158,26 +1166,61 @@ class MessageServer
                 cmd.Parameters.AddWithValue("Code", inviteCode);
                 result = cmd.ExecuteScalar();
             }    
-                if (result != null)
-                {
-                    string guildID = (string)result;
-                    string userID = getUserIDFromToken(token);
-                    addUserToGuild(userID, guildID);
-                    responseMessage = null;
-                    code = 200;
-                }
-                else 
-                {
-                    var responseJson = new { error = "Invalid invite code", errcode = "INVALID_INVITE"};
-                    responseMessage = JsonConvert.SerializeObject(responseJson);
-                    code = 400;
+            if (result != null)
+            {
+                string guildID = (string)result;
+                string userID = getUserIDFromToken(token);
+                addUserToGuild(userID, guildID);
+                responseMessage = null;
+                code = 200;
+            }
+            else 
+            {
+                var responseJson = new { error = "Invalid invite code", errcode = "INVALID_INVITE"};
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 400;
             }
         }
         sendResponse(context, typeJson, code, responseMessage);
     }
     static void apiRequestKeys(HttpListenerContext context)
     {
-
+        string? token;
+        string? guildID;
+        dynamic jsonBodyObject = parsePost(context);
+        int code;
+        string? responseMessage;
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            guildID = jsonBodyObject.guildID;
+        }
+        if (string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code);
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else
+        {
+            string userID = getUserIDFromToken(token);
+            using (var con = new SQLiteConnection(connectionString))
+            using (var cmd = new SQLiteCommand(con))
+            {
+                con.Open();
+                cmd.CommandText = @"IF NOT EXISTS (SELECT * FROM tblKeyRequests WHERE UserID = @UserID AND GuildID = @GuildID)
+                                    INSERT INTO tblKeyRequests(UserID, GuildID)
+                                    VALUES (@UserID, @GuildID);";
+                cmd.Parameters.AddWithValue("UserID", userID);
+                cmd.Parameters.AddWithValue("GuildID", guildID);
+            }
+            code = 200;
+            responseMessage = null;
+        }
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static string createToken(string userID)// Generates a token that the client can then use to authenticate with
     {
