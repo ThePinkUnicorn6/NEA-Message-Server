@@ -2,7 +2,6 @@
 using System.Text;
 using Newtonsoft.Json;
 using System.Data.SQLite;
-using System.Windows.Markup;
 
 class MessageServer
 {
@@ -59,6 +58,7 @@ class MessageServer
                     case "/api/account/create": apiCreateUser(context); break; //Post
                     case "/api/account/login": apiLogin(context); break; //Post
                     case "/api/account/userID": apiReturnUserIDFromToken(context); break; //Get
+                    case "/api/guild/keyRequests": apiGetKeyRequests(context); break; //Get
                     default:
                     {
                         var responseJson = new
@@ -156,13 +156,13 @@ class MessageServer
             );";
             cmd.ExecuteNonQuery();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblKeyRequests' (
-                'RequesterUserID' CHAR(36),
+                'RequesterID' CHAR(36),
                 'GuildID'         CHAR(36),
                 'EncryptedKey'    TEXT,
                 'ResponderUserID' CHAR(36),
-                FOREIGN KEY('RequesterUserID') REFERENCES 'tblUsers'('UserID'),
+                FOREIGN KEY('RequesterID') REFERENCES 'tblUsers'('UserID'),
                 FOREIGN KEY('GuildID') REFERENCES 'tblGuilds'('GuildID'),
-                PRIMARY KEY('RequesterUserID', 'GuildID')
+                PRIMARY KEY('RequesterID', 'GuildID')
             );";
             cmd.ExecuteNonQuery();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblInvites' (
@@ -537,7 +537,7 @@ class MessageServer
             using (var cmd = new SQLiteCommand(con))
             {
                 con.Open();
-                cmd.CommandText = @"SELECT UserID, UserName, Picture, Description
+                cmd.CommandText = @"SELECT UserID, UserName, Picture, Description, PublicKey
                                     FROM tblUsers
                                     WHERE UserID = @UserID";
                 cmd.Parameters.AddWithValue("UserID", requestedUserID);
@@ -557,7 +557,8 @@ class MessageServer
                             ID = reader.GetString(0),
                             Name = reader.GetString(1),
                             Picture = reader.GetString(2),
-                            Description = description
+                            Description = description,
+                            PublicKey = reader.GetString(3),
                         };
                         responseMessage = JsonConvert.SerializeObject(user);
                         code = 200;
@@ -1217,9 +1218,9 @@ class MessageServer
                 cmd.CommandText = @"SELECT EXISTS( 
                                         SELECT 1
                                         FROM tblKeyRequests
-                                        WHERE RequesterUserID = @UserID 
+                                        WHERE RequesterID = @UserID 
                                         AND GuildID = @GuildID
-                                    );"; 
+                                    );"; // Checks if the user has allready submited a request for the key for that guild before.
                 cmd.Parameters.AddWithValue("UserID", userID);
                 cmd.Parameters.AddWithValue("GuildID", guildID);
                 bool alreadyRequested = (Int64)cmd.ExecuteScalar() > 0;
@@ -1227,11 +1228,11 @@ class MessageServer
                 {
                     cmd.CommandText = @"SELECT EncryptedKey, ResponderUserID
                                         FROM tblKeyRequestes
-                                        WHERE RequesterUserID = @UserID 
+                                        WHERE RequesterID = @UserID 
                                         AND GuildID = @GuildID;";
                     cmd.Parameters.AddWithValue("UserID", userID);
                     cmd.Parameters.AddWithValue("GuildID", guildID);
-                    if (cmd.ExecuteReader().Read()) 
+                    if (cmd.ExecuteReader().Read()) // If a user has responded the the request, return the endcrypted key and the users ID
                     {
                         var keys = new {
                             returned = true,
@@ -1241,16 +1242,16 @@ class MessageServer
                         responseMessage = JsonConvert.SerializeObject(keys);
                         code = 200;
                     } 
-                    else 
+                    else // If no other users have responded the the request return nothing
                     {
                         var keys = new {
                             returned = false,
                         };
                         responseMessage = JsonConvert.SerializeObject(keys);
-                        code = 425;
+                        code = 202; // 
                     }
                 }
-                else 
+                else // If the client has not previously requested details for that guild, store the request.
                 {
                     cmd.CommandText = @"INSERT INTO tblKeyRequests(UserID, GuildID)
                                         VALUES (@UserID, @GuildID);";
@@ -1261,9 +1262,74 @@ class MessageServer
                     responseMessage = null;
                 }
             }
-
         }
         sendResponse(context, typeJson, code, responseMessage);
+    }
+    static void apiGetKeyRequests(HttpListenerContext context)
+    {
+        string? token = context.Request.QueryString["token"];
+        string responseMessage;
+        int code;
+        if (string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code);
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else
+        {
+            string userID = getUserIDFromToken(token);
+            object[] keyRequests = checkKeyRequests(userID);
+            // Convert the keyRequests object array into json
+            responseMessage = "[{ \"keyRequests\": [";
+            for (int i=0; i < keyRequests.Length; i++)
+            {
+                dynamic request = keyRequests[i];
+                responseMessage += "{";
+                responseMessage += "\"userID\": \"" + (string)request.UserID + "\", ";
+                responseMessage += "\"guildID\": \"" + (string)request.GuildID + "\"";
+                responseMessage += "}";
+                if (i + 1 != keyRequests.Length)
+                {
+                    responseMessage += ", ";
+                }
+            }
+            responseMessage += "]}]";
+            code = 200;
+        }
+        sendResponse(context, typeJson, code, responseMessage);
+    }
+    static object[] checkKeyRequests(string userID)
+    {
+        List<object> keyRequests = new();
+        using (var con = new SQLiteConnection(connectionString))
+        using (var cmd = new SQLiteCommand(con))
+        {
+            con.Open(); 
+            cmd.CommandText = @"SELECT tblKeyRequests.GuildID, RequesterID
+                                FROM tblKeyRequests, tblGuildConnections
+                                WHERE tblGuildConnections.GuildID = tblKeyRequests.GuildID
+                                AND tblGuildConnections.UserID = @UserID
+                                AND ResponderUserID IS NOT NULL
+                                ;"; 
+            cmd.Parameters.AddWithValue("UserID", userID);
+            
+            using (SQLiteDataReader reader = cmd.ExecuteReader())
+            {
+                while (reader.Read()) // Loops through each message and adds it to the message list
+                {
+                    var responseRow = new
+                    {
+                        GuildID = reader.GetString(0),
+                        UserID = reader.GetString(1),
+                    };
+                    keyRequests.Add(responseRow);
+                }
+            }
+        }
+        return keyRequests.ToArray();
+    }
+    static string[] getPings(string userID)
+    {
+        // TODO: Fetch ping id's and return them as an array
+        string[] pingMessageIDs = {};
+        return pingMessageIDs;
     }
     static string createToken(string userID)// Generates a token that the client can then use to authenticate with
     {

@@ -33,4 +33,5 @@ class User
     public string ID {get; set;}
     public string Description {get; set;}
     public string Picture {get; set;}
+    public string PublicKey {get; set;}
 }
