@@ -2,6 +2,7 @@
 using System.Text;
 using Newtonsoft.Json;
 using System.Data.SQLite;
+using System.Windows.Markup;
 
 class MessageServer
 {
@@ -155,11 +156,13 @@ class MessageServer
             );";
             cmd.ExecuteNonQuery();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblKeyRequests' (
-                'UserID'        CHAR(36),
-                'GuildID'       CHAR(36),
-                FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID'),
+                'RequesterUserID' CHAR(36),
+                'GuildID'         CHAR(36),
+                'EncryptedKey'    TEXT,
+                'ResponderUserID' CHAR(36),
+                FOREIGN KEY('RequesterUserID') REFERENCES 'tblUsers'('UserID'),
                 FOREIGN KEY('GuildID') REFERENCES 'tblGuilds'('GuildID'),
-                PRIMARY KEY('UserID', 'GuildID')
+                PRIMARY KEY('RequesterUserID', 'GuildID')
             );";
             cmd.ExecuteNonQuery();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblInvites' (
@@ -1211,14 +1214,54 @@ class MessageServer
             using (var cmd = new SQLiteCommand(con))
             {
                 con.Open();
-                cmd.CommandText = @"IF NOT EXISTS (SELECT * FROM tblKeyRequests WHERE UserID = @UserID AND GuildID = @GuildID)
-                                    INSERT INTO tblKeyRequests(UserID, GuildID)
-                                    VALUES (@UserID, @GuildID);";
+                cmd.CommandText = @"SELECT EXISTS( 
+                                        SELECT 1
+                                        FROM tblKeyRequests
+                                        WHERE RequesterUserID = @UserID 
+                                        AND GuildID = @GuildID
+                                    );"; 
                 cmd.Parameters.AddWithValue("UserID", userID);
                 cmd.Parameters.AddWithValue("GuildID", guildID);
+                bool alreadyRequested = (Int64)cmd.ExecuteScalar() > 0;
+                if (alreadyRequested)
+                {
+                    cmd.CommandText = @"SELECT EncryptedKey, ResponderUserID
+                                        FROM tblKeyRequestes
+                                        WHERE RequesterUserID = @UserID 
+                                        AND GuildID = @GuildID;";
+                    cmd.Parameters.AddWithValue("UserID", userID);
+                    cmd.Parameters.AddWithValue("GuildID", guildID);
+                    if (cmd.ExecuteReader().Read()) 
+                    {
+                        var keys = new {
+                            returned = true,
+                            key = cmd.ExecuteReader().GetString(0),
+                            userID = cmd.ExecuteReader().GetString(1),
+                        };
+                        responseMessage = JsonConvert.SerializeObject(keys);
+                        code = 200;
+                    } 
+                    else 
+                    {
+                        var keys = new {
+                            returned = false,
+                        };
+                        responseMessage = JsonConvert.SerializeObject(keys);
+                        code = 425;
+                    }
+                }
+                else 
+                {
+                    cmd.CommandText = @"INSERT INTO tblKeyRequests(UserID, GuildID)
+                                        VALUES (@UserID, @GuildID);";
+                    cmd.Parameters.AddWithValue("UserID", userID);
+                    cmd.Parameters.AddWithValue("GuildID", guildID);
+                    cmd.ExecuteNonQuery();
+                    code = 200;
+                    responseMessage = null;
+                }
             }
-            code = 200;
-            responseMessage = null;
+
         }
         sendResponse(context, typeJson, code, responseMessage);
     }
@@ -1263,7 +1306,7 @@ class MessageServer
                                     SELECT 1 
                                     FROM tblTokens
                                     WHERE Token = @Token
-                                )";
+                                );";
             cmd.Parameters.AddWithValue("Token", token);
             valid = (Int64)cmd.ExecuteScalar() > 0;
         }
