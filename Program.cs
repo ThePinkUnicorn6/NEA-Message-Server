@@ -54,11 +54,12 @@ class MessageServer
                     case "/api/guild/createInvite": apiCreateInvite(context); break; //Get
                     case "/api/guild/listInvites": apiListInvites(context); break; //Get
                     case "/api/guild/join": apiJoinGuildFromCode(context); break; //Post
-                    case "/api/guild/requestKey": apiRequestKeys(context); break; //Get
                     case "/api/account/create": apiCreateUser(context); break; //Post
                     case "/api/account/login": apiLogin(context); break; //Post
                     case "/api/account/userID": apiReturnUserIDFromToken(context); break; //Get
-                    case "/api/guild/keyRequests": apiGetKeyRequests(context); break; //Get
+                    case "/api/guild/key/request": apiRequestKeys(context); break; //Get
+                    case "/api/guild/key/listRequests": apiGetKeyRequests(context); break; //Get
+                    case "/api/guild/key/submitKey": apiSubmitKey(context); break; //Post
                     default:
                     {
                         var responseJson = new
@@ -82,6 +83,7 @@ class MessageServer
             }
         }
     }
+
     static void createDB(string connectionString) // Opens connection to SQLite and creates the tables required
     {
         using (var con = new SQLiteConnection(connectionString)) 
@@ -1235,20 +1237,16 @@ class MessageServer
                     if (cmd.ExecuteReader().Read()) // If a user has responded the the request, return the endcrypted key and the users ID
                     {
                         var keys = new {
-                            returned = true,
                             key = cmd.ExecuteReader().GetString(0),
                             userID = cmd.ExecuteReader().GetString(1),
                         };
                         responseMessage = JsonConvert.SerializeObject(keys);
                         code = 200;
                     } 
-                    else // If no other users have responded the the request return nothing
+                    else // If no other users have responded the the request will return nothing
                     {
-                        var keys = new {
-                            returned = false,
-                        };
-                        responseMessage = JsonConvert.SerializeObject(keys);
-                        code = 202; // 
+                        responseMessage = null;
+                        code = 202; 
                     }
                 }
                 else // If the client has not previously requested details for that guild, store the request.
@@ -1325,9 +1323,13 @@ class MessageServer
         }
         return keyRequests.ToArray();
     }
+    static void apiSubmitKey(HttpListenerContext context)
+    {
+        //TODO
+    }
     static string[] getPings(string userID)
     {
-        // TODO: Fetch ping id's and return them as an array
+        // TODO: Fetch ping message id's and return them as an array
         string[] pingMessageIDs = {};
         return pingMessageIDs;
     }
