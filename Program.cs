@@ -57,9 +57,9 @@ class MessageServer
                     case "/api/account/create": apiCreateUser(context); break; //Post
                     case "/api/account/login": apiLogin(context); break; //Post
                     case "/api/account/userID": apiReturnUserIDFromToken(context); break; //Get
-                    case "/api/guild/key/request": apiRequestKeys(context); break; //Get
+                    case "/api/guild/key/request": apiRequestKeys(context); break; //Post
                     case "/api/guild/key/listRequests": apiGetKeyRequests(context); break; //Get
-                    case "/api/guild/key/submitKey": apiSubmitKey(context); break; //Post
+                    case "/api/guild/key/submit": apiSubmitKey(context); break; //Post
                     default:
                     {
                         var responseJson = new
@@ -73,7 +73,6 @@ class MessageServer
                     }break;
                 }
             }
-
             catch (Exception ex)
             {
                 log("ERROR", ex.GetType() + "Error: \n", ex);
@@ -158,10 +157,10 @@ class MessageServer
             );";
             cmd.ExecuteNonQuery();
             cmd.CommandText = @"CREATE TABLE IF NOT EXISTS 'tblKeyRequests' (
-                'RequesterID' CHAR(36),
-                'GuildID'         CHAR(36),
-                'EncryptedKey'    TEXT,
-                'ResponderUserID' CHAR(36),
+                'RequesterID'  CHAR(36),
+                'GuildID'      CHAR(36),
+                'EncryptedKey' TEXT,
+                'ResponderID'  CHAR(36),
                 FOREIGN KEY('RequesterID') REFERENCES 'tblUsers'('UserID'),
                 FOREIGN KEY('GuildID') REFERENCES 'tblGuilds'('GuildID'),
                 PRIMARY KEY('RequesterID', 'GuildID')
@@ -560,7 +559,7 @@ class MessageServer
                             Name = reader.GetString(1),
                             Picture = reader.GetString(2),
                             Description = description,
-                            PublicKey = reader.GetString(3),
+                            PublicKey = reader.GetString(4),
                         };
                         responseMessage = JsonConvert.SerializeObject(user);
                         code = 200;
@@ -617,11 +616,12 @@ class MessageServer
                 else
                 {
                     string userID = Guid.NewGuid().ToString();
-                    cmd.CommandText = @"INSERT INTO tblUsers (UserID, UserName, PassHash)
-                                        VALUES (@UserID, @UserName, @PassHash)";
+                    cmd.CommandText = @"INSERT INTO tblUsers (UserID, UserName, PassHash, PublicKey, Picture)
+                                        VALUES (@UserID, @UserName, @PassHash, @PublicKey, 'default')";
                     cmd.Parameters.AddWithValue("UserID", userID);
                     cmd.Parameters.AddWithValue("UserName", userName);
                     cmd.Parameters.AddWithValue("PassHash", passHash);
+                    cmd.Parameters.AddWithValue("PublicKey", publicKey);
                     cmd.ExecuteNonQuery();
                     var responseJson = new { token = createToken(userID) };
                     responseMessage = JsonConvert.SerializeObject(responseJson);
@@ -875,7 +875,7 @@ class MessageServer
             using (var cmd = new SQLiteCommand(con))
             {
                 con.Open();
-                cmd.CommandText = @"SELECT tblGuilds.GuildID, GuildName, OwnerID, GuildDesc, ChannelID, ChannelName, ChannelType, ChannelDesc
+                cmd.CommandText = @"SELECT tblGuilds.GuildID, GuildName, OwnerID, GuildDesc, GuildKeyDigest, ChannelID, ChannelName, ChannelType, ChannelDesc
                 FROM tblGuilds, tblGuildConnections, tblChannels, tblUsers
                 WHERE tblUsers.UserID = @UserID 
                 AND tblUsers.UserID = tblGuildConnections.UserID
@@ -888,7 +888,7 @@ class MessageServer
                     while (reader.Read())
                     {
                         string guildDesc = reader[3] == null ? null : reader[3].ToString();
-                        string channelDesc = reader[7] == null ? null : reader[7].ToString(); // If description is null, set the variable to null to stop it from erroring.
+                        string channelDesc = reader[8] == null ? null : reader[8].ToString(); // If description is null, set the variable to null to stop it from erroring.
 
                         var responseRow = new
                         {
@@ -896,9 +896,10 @@ class MessageServer
                             GuildName = reader.GetString(1),
                             GuildOwnerID = reader.GetString(2),
                             GuildDesc = guildDesc,
-                            ChannelID = reader.GetString(4),
-                            ChannelName = reader.GetString(5),
-                            ChannelType = reader.GetInt32(6),
+                            GuildKeyDigest = reader.GetString(4),
+                            ChannelID = reader.GetString(5),
+                            ChannelName = reader.GetString(6),
+                            ChannelType = reader.GetInt32(7),
                             ChannelDesc = channelDesc
                         };
                         dbResponse.Add(responseRow);
@@ -914,6 +915,7 @@ class MessageServer
                     guildsJson += "\"guildID\": \"" + dbResponse[i].GuildID + "\", ";
                     guildsJson += "\"guildOwnerID\": \"" + dbResponse[i].GuildOwnerID + "\", ";
                     guildsJson += "\"guildDesc\": \"" + dbResponse[i].GuildDesc + "\", ";
+                    guildsJson += "\"guildKeyDigest\": \"" + dbResponse[i].GuildKeyDigest + "\", ";
                     guildsJson += "\"channels\": [";
                 }
                 guildsJson += "{"; // Build channel array in guilds json array.
@@ -1217,41 +1219,45 @@ class MessageServer
             using (var cmd = new SQLiteCommand(con))
             {
                 con.Open();
-                cmd.CommandText = @"SELECT EXISTS( 
-                                        SELECT 1
-                                        FROM tblKeyRequests
-                                        WHERE RequesterID = @UserID 
-                                        AND GuildID = @GuildID
-                                    );"; // Checks if the user has allready submited a request for the key for that guild before.
+                cmd.CommandText = 
+                    @"SELECT EXISTS( 
+                        SELECT 1
+                        FROM tblKeyRequests
+                        WHERE RequesterID = @UserID 
+                        AND GuildID = @GuildID
+                    );"; // Checks if the user has allready submited a request for the key for that guild before.
                 cmd.Parameters.AddWithValue("UserID", userID);
                 cmd.Parameters.AddWithValue("GuildID", guildID);
                 bool alreadyRequested = (Int64)cmd.ExecuteScalar() > 0;
                 if (alreadyRequested)
                 {
-                    cmd.CommandText = @"SELECT EncryptedKey, ResponderUserID
-                                        FROM tblKeyRequestes
+                    cmd.CommandText = @"SELECT EncryptedKey, ResponderID
+                                        FROM tblKeyRequests
                                         WHERE RequesterID = @UserID 
                                         AND GuildID = @GuildID;";
                     cmd.Parameters.AddWithValue("UserID", userID);
                     cmd.Parameters.AddWithValue("GuildID", guildID);
-                    if (cmd.ExecuteReader().Read()) // If a user has responded the the request, return the endcrypted key and the users ID
+                    using (SQLiteDataReader reader = cmd.ExecuteReader())
                     {
-                        var keys = new {
-                            key = cmd.ExecuteReader().GetString(0),
-                            userID = cmd.ExecuteReader().GetString(1),
-                        };
-                        responseMessage = JsonConvert.SerializeObject(keys);
-                        code = 200;
-                    } 
-                    else // If no other users have responded the the request will return nothing
-                    {
-                        responseMessage = null;
-                        code = 202; 
+                        if (!reader.Read())
+                        {
+                            var keys = new {
+                                key = reader.GetString(0),
+                                userID = reader.GetString(1),
+                            };
+                            responseMessage = JsonConvert.SerializeObject(keys);
+                            code = 200;
+                        } 
+                        else // If no other users have responded the the request will return nothing
+                        {
+                            responseMessage = null;
+                            code = 202; 
+                        }
                     }
                 }
                 else // If the client has not previously requested details for that guild, store the request.
                 {
-                    cmd.CommandText = @"INSERT INTO tblKeyRequests(UserID, GuildID)
+                    cmd.CommandText = @"INSERT INTO tblKeyRequests(RequesterID, GuildID)
                                         VALUES (@UserID, @GuildID);";
                     cmd.Parameters.AddWithValue("UserID", userID);
                     cmd.Parameters.AddWithValue("GuildID", guildID);
@@ -1275,20 +1281,21 @@ class MessageServer
             string userID = getUserIDFromToken(token);
             object[] keyRequests = checkKeyRequests(userID);
             // Convert the keyRequests object array into json
-            responseMessage = "[{ \"keyRequests\": [";
-            for (int i=0; i < keyRequests.Length; i++)
-            {
-                dynamic request = keyRequests[i];
-                responseMessage += "{";
-                responseMessage += "\"userID\": \"" + (string)request.UserID + "\", ";
-                responseMessage += "\"guildID\": \"" + (string)request.GuildID + "\"";
-                responseMessage += "}";
-                if (i + 1 != keyRequests.Length)
-                {
-                    responseMessage += ", ";
-                }
-            }
-            responseMessage += "]}]";
+            // responseMessage = "[{ \"keyRequests\": [";
+            // for (int i=0; i < keyRequests.Length; i++)
+            // {
+            //     dynamic request = keyRequests[i];
+            //     responseMessage += "{";
+            //     responseMessage += "\"userID\": \"" + (string)request.UserID + "\", ";
+            //     responseMessage += "\"guildID\": \"" + (string)request.GuildID + "\"";
+            //     responseMessage += "}";
+            //     if (i + 1 != keyRequests.Length)
+            //     {
+            //         responseMessage += ", ";
+            //     }
+            // }
+            // responseMessage += "]}]";
+            responseMessage = JsonConvert.SerializeObject(keyRequests);
             code = 200;
         }
         sendResponse(context, typeJson, code, responseMessage);
@@ -1300,12 +1307,12 @@ class MessageServer
         using (var cmd = new SQLiteCommand(con))
         {
             con.Open(); 
-            cmd.CommandText = @"SELECT tblKeyRequests.GuildID, RequesterID
-                                FROM tblKeyRequests, tblGuildConnections
-                                WHERE tblGuildConnections.GuildID = tblKeyRequests.GuildID
-                                AND tblGuildConnections.UserID = @UserID
-                                AND ResponderUserID IS NOT NULL
-                                ;"; 
+            cmd.CommandText = 
+                @"SELECT tblKeyRequests.GuildID, RequesterID
+                FROM tblKeyRequests, tblGuildConnections
+                WHERE tblGuildConnections.GuildID = tblKeyRequests.GuildID
+                AND tblGuildConnections.UserID = @UserID
+                AND ResponderID IS NULL;"; 
             cmd.Parameters.AddWithValue("UserID", userID);
             
             using (SQLiteDataReader reader = cmd.ExecuteReader())
@@ -1325,7 +1332,51 @@ class MessageServer
     }
     static void apiSubmitKey(HttpListenerContext context)
     {
-        //TODO
+        string? token;
+        string? guildID;
+        string? keyCypherText;
+        string? requesterID;
+        dynamic jsonBodyObject = parsePost(context);
+        int code;
+        string? responseMessage;
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            guildID = jsonBodyObject.guildID;
+            requesterID = jsonBodyObject.userID;
+            keyCypherText = jsonBodyObject.keyCypherText;
+        }
+        if (string.IsNullOrEmpty(token) | string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(requesterID) | string.IsNullOrEmpty(keyCypherText))
+            { returnMissingParameterError(out responseMessage, out code); }
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else
+        {
+            string userID = getUserIDFromToken(token);
+            using (var con = new SQLiteConnection(connectionString))
+            using (var cmd = new SQLiteCommand(con))
+            {
+                con.Open(); 
+                cmd.CommandText = 
+                    @"UPDATE tblKeyRequests
+                    SET ResponderID = @ResponderID, EncryptedKey = @Key
+                    WHERE RequesterID = @RequesterID
+                    AND GuildID = @GuildID;";
+                cmd.Parameters.AddWithValue("ResponderID", userID);
+                cmd.Parameters.AddWithValue("Key", keyCypherText);
+                cmd.Parameters.AddWithValue("RequesterID", requesterID);
+                cmd.Parameters.AddWithValue("GuildID", guildID);
+            }
+            responseMessage = null;
+            code = 200;
+        }
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static string[] getPings(string userID)
     {
