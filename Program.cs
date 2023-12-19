@@ -1231,15 +1231,18 @@ class MessageServer
                 bool alreadyRequested = (Int64)cmd.ExecuteScalar() > 0;
                 if (alreadyRequested)
                 {
-                    cmd.CommandText = @"SELECT EncryptedKey, ResponderID
-                                        FROM tblKeyRequests
-                                        WHERE RequesterID = @UserID 
-                                        AND GuildID = @GuildID;";
+                    cmd.CommandText = 
+                        @"SELECT EncryptedKey, ResponderID
+                        FROM tblKeyRequests
+                        WHERE RequesterID = @UserID 
+                        AND GuildID = @GuildID
+                        AND EncryptedKey IS NOT NULL;";
                     cmd.Parameters.AddWithValue("UserID", userID);
                     cmd.Parameters.AddWithValue("GuildID", guildID);
+                    bool keysReturned;
                     using (SQLiteDataReader reader = cmd.ExecuteReader())
                     {
-                        if (!reader.Read())
+                        if (reader.Read())
                         {
                             var keys = new {
                                 key = reader.GetString(0),
@@ -1247,12 +1250,25 @@ class MessageServer
                             };
                             responseMessage = JsonConvert.SerializeObject(keys);
                             code = 200;
+                            keysReturned = true;
                         } 
                         else // If no other users have responded the the request will return nothing
                         {
                             responseMessage = null;
                             code = 202; 
+                            keysReturned = false;
                         }
+                    }
+                    if (keysReturned)
+                    {
+                        // After successfully returning the key, delete the request from the db
+                        // so if the user needs to request it again there are no problems.
+                        cmd.CommandText = @"DELETE FROM tblKeyRequests
+                                            WHERE RequesterID = @UserID
+                                            AND GuildID = @GuildID;";
+                        cmd.Parameters.AddWithValue("UserID", userID);
+                        cmd.Parameters.AddWithValue("GuildID", guildID);
+                        cmd.ExecuteNonQuery();
                     }
                 }
                 else // If the client has not previously requested details for that guild, store the request.
@@ -1372,6 +1388,7 @@ class MessageServer
                 cmd.Parameters.AddWithValue("Key", keyCypherText);
                 cmd.Parameters.AddWithValue("RequesterID", requesterID);
                 cmd.Parameters.AddWithValue("GuildID", guildID);
+                cmd.ExecuteNonQuery();
             }
             responseMessage = null;
             code = 200;
