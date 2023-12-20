@@ -26,7 +26,7 @@ class MessageServer
             log("DEBUG", "Using SQLite version: " + con.ServerVersion);
         }
         createDB(connectionString);
-        const string url = "http://localhost:8080/"; // Sets up http server
+        const string url = "http://+:8080/"; // Sets up http server
         // TODO: log and give error if port is already in use.
         HttpListener listener = new HttpListener();
         listener.Prefixes.Add(url);
