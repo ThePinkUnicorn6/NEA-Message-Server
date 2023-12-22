@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text;
 using Newtonsoft.Json;
 using System.Data.SQLite;
@@ -542,17 +542,8 @@ class MessageServer
         else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code); 
         else
         {
-            using (var con = new SQLiteConnection(connectionString))
-            using (var cmd = new SQLiteCommand(con))
-            {
-                con.Open();
-                cmd.CommandText = @"SELECT UserID, UserName, Picture, Description, PublicKey
-                                    FROM tblUsers
-                                    WHERE UserID = @UserID";
-                cmd.Parameters.AddWithValue("UserID", requestedUserID);
-                using (SQLiteDataReader reader = cmd.ExecuteReader())
-                {
-                    if (!reader.Read())
+            User user = getUserInfoFromID(requestedUserID);
+            if (user == null)
                     {
                         var responseJson = new { error = "That UserID does not exist", errcode = "NOT_FOUND" };
                         responseMessage = JsonConvert.SerializeObject(responseJson);
@@ -560,19 +551,8 @@ class MessageServer
                     }
                     else
                     {
-                        string description = reader[3] == null ? null : reader[3].ToString();
-                        User user = new User
-                        {
-                            ID = reader.GetString(0),
-                            Name = reader.GetString(1),
-                            Picture = reader.GetString(2),
-                            Description = description,
-                            PublicKey = reader.GetString(4),
-                        };
                         responseMessage = JsonConvert.SerializeObject(user);
                         code = 200;
-                    }
-                }
             }
         }
         sendResponse(context, typeJson, code, responseMessage);
@@ -1490,6 +1470,39 @@ class MessageServer
             userID = temp == null ? null : (string)temp; // If the select returns null, store string as null, otherwise as a string.
         }
         return userID;
+    }
+    static User getUserInfoFromID(string userID)
+    {
+        User user;
+        using (var con = new SQLiteConnection(connectionString))
+        using (var cmd = new SQLiteCommand(con))
+        {
+            con.Open();
+            cmd.CommandText = @"SELECT UserID, UserName, Picture, Description, PublicKey
+                                FROM tblUsers
+                                WHERE UserID = @UserID";
+            cmd.Parameters.AddWithValue("UserID", userID);
+            using (SQLiteDataReader reader = cmd.ExecuteReader())
+            {
+                if (reader.Read())
+                {
+                    string description = reader[3] == null ? null : reader[3].ToString();
+                    user = new User
+                    {
+                        ID = reader.GetString(0),
+                        Name = reader.GetString(1),
+                        Picture = reader.GetString(2),
+                        Description = description,
+                        PublicKey = reader.GetString(4),
+                    };
+                }
+                else 
+                {
+                    user = new User();
+                }
+            }
+        }
+        return user;
     }
     static bool checkGuildExists(string guildID)
     {
