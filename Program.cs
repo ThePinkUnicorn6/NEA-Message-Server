@@ -9,6 +9,7 @@ class MessageServer
     const string typeJson = "application/json"; // For ease of use when sending a response.
     static readonly string logPath = @"logs\Server_" + DateTime.Now.ToString("yyyy-MM-dd_HH.mm.ss") + ".log"; // Cannot use a const because the time can't be calculated at compilation.
     const string connectionString = "Data Source=data.db; Version=3; New=True; Compress=True;";
+    const bool logAllRequests = true;
     const int owner = 5;
     const int admin = 4;
     const int unprivileged = 3;    
@@ -37,7 +38,7 @@ class MessageServer
         {
             HttpListenerContext context = listener.GetContext();
             Uri uri = new Uri(context.Request.Url.ToString());
-            log("INFO", context.Request.UserHostAddress.ToString() + " accessed " + uri.AbsolutePath.ToString());
+            if (logAllRequests) {log("INFO", context.Request.UserHostAddress.ToString() + " accessed " + uri.AbsolutePath.ToString());}
             string responseMessage;
             try // This try catch should hopefully never run, but if needed it will stop the server from crashing.
             {
@@ -195,7 +196,10 @@ class MessageServer
                 outputStream.Write(responseBytes, 0, responseBytes.Length);
                 outputStream.Close();
             }
-            Console.WriteLine("Sent response: " + responseMessage);
+            if (logAllRequests)
+            {
+                Console.WriteLine("Sent response: " + responseMessage);
+            }
         }
         catch(Exception ex) { log("ERROR", "Failed to send response", ex); }
     }
@@ -276,25 +280,29 @@ class MessageServer
                 using (var cmd = new SQLiteCommand(con))
                 {
                     con.Open();
-                    // Will return all messages in a channel if AfterMessageID is not null, otherwise it will return only the messages after the message specified.
-                    cmd.CommandText = @"SELECT tblUsers.UserID, UserName, MessageID, TimeSent, MessageText, IV
-                                        FROM tblMessages, tblUsers
-                                        WHERE tblMessages.ChannelID = @ChannelID
-                                        AND tblMessages.UserID = tblUsers.UserID
-                                        AND 
+                    // Will return all messages in a channel if AfterMessageID is null, otherwise it will return only the messages after the message specified.
+                    cmd.CommandText = @"SELECT * FROM
                                         (
-                                            CASE 
-                                                WHEN @AfterMessageID IS NOT NULL AND tblMessages.TimeSent > (
-                                                    SELECT TimeSent
-                                                    FROM tblMessages
-                                                    WHERE MessageID = @AfterMessageID
-                                                )
-                                                OR @AfterMessageID IS NULL
-                                                THEN true
-                                                ELSE false
-                                            END
+                                            SELECT tblUsers.UserID, UserName, MessageID, TimeSent, MessageText, IV
+                                            FROM tblMessages, tblUsers
+                                            WHERE tblMessages.ChannelID = @ChannelID
+                                            AND tblMessages.UserID = tblUsers.UserID
+                                            AND (
+                                                CASE 
+                                                    WHEN @AfterMessageID IS NOT NULL AND tblMessages.TimeSent > (
+                                                        SELECT TimeSent
+                                                        FROM tblMessages
+                                                        WHERE MessageID = @AfterMessageID
+                                                    )
+                                                    OR @AfterMessageID IS NULL
+                                                    THEN true
+                                                    ELSE false
+                                                END
+                                            )
+                                            ORDER BY TimeSent desc
+                                            LIMIT 50
                                         )
-                                        LIMIT 50;"; 
+                                        ORDER BY TimeSent ASC;"; 
                     cmd.Parameters.AddWithValue("AfterMessageID", afterMessageID);
                     cmd.Parameters.AddWithValue("ChannelID", channelID);
                     
@@ -911,17 +919,17 @@ class MessageServer
             {
                 if (i == 0 || dbResponse[i].GuildID != dbResponse[i - 1].GuildID) // If the guildID is different from the previous iteration, start a new guild item in the JSON array.
                 {
-                    guildsJson += "\"guildName\": \"" + dbResponse[i].GuildName + "\", ";
+                    guildsJson += "\"guildName\": " + JsonConvert.SerializeObject(dbResponse[i].GuildName) + ", ";
                     guildsJson += "\"guildID\": \"" + dbResponse[i].GuildID + "\", ";
                     guildsJson += "\"guildOwnerID\": \"" + dbResponse[i].GuildOwnerID + "\", ";
-                    guildsJson += "\"guildDesc\": \"" + dbResponse[i].GuildDesc + "\", ";
+                    guildsJson += "\"guildDesc\": " + JsonConvert.SerializeObject(dbResponse[i].GuildDesc) + ", ";
                     guildsJson += "\"guildKeyDigest\": \"" + dbResponse[i].GuildKeyDigest + "\", ";
                     guildsJson += "\"channels\": [";
                 }
                 guildsJson += "{"; // Build channel array in guilds json array.
-                guildsJson += "\"channelName\": \"" + dbResponse[i].ChannelName + "\", ";
+                guildsJson += "\"channelName\": " + JsonConvert.SerializeObject(dbResponse[i].ChannelName) + ", ";
                 guildsJson += "\"channelID\": \"" + dbResponse[i].ChannelID + "\", ";
-                guildsJson += "\"channelDesc\": \"" + dbResponse[i].ChannelDesc + "\", ";
+                guildsJson += "\"channelDesc\": " + JsonConvert.SerializeObject(dbResponse[i].ChannelDesc) + ", ";
                 guildsJson += "\"channelType\": \"" + dbResponse[i].ChannelType + "\"}";
                 if (dbResponse.Count > i + 1 && dbResponse[i].GuildID == dbResponse[i + 1].GuildID)
                 {
@@ -1179,7 +1187,8 @@ class MessageServer
                 string guildID = (string)result;
                 string userID = getUserIDFromToken(token);
                 addUserToGuild(userID, guildID);
-                responseMessage = null;
+                var responseJson = new { guildID = guildID };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
                 code = 200;
             }
             else 
