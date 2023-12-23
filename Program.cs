@@ -1,7 +1,10 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using Newtonsoft.Json;
 using System.Data.SQLite;
+using System.Data;
+using System.Security;
+using System.Dynamic;
 
 class MessageServer
 {
@@ -9,7 +12,7 @@ class MessageServer
     const string typeJson = "application/json"; // For ease of use when sending a response.
     static readonly string logPath = @"logs\Server_" + DateTime.Now.ToString("yyyy-MM-dd_HH.mm.ss") + ".log"; // Cannot use a const because the time can't be calculated at compilation.
     const string connectionString = "Data Source=data.db; Version=3; New=True; Compress=True;";
-    const bool logAllRequests = true;
+    const bool logAllRequests = false;
     const int owner = 5;
     const int admin = 4;
     const int unprivileged = 3;    
@@ -52,8 +55,8 @@ class MessageServer
                     case "/api/guild/create": apiCreateGuild(context); break; //Post
                     case "/api/guild/listGuilds": apiListGuilds(context); break; //Get
                     case "/api/guild/setDetails": apiSetGuildDetails(context); break; //Post
-                    case "/api/guild/createInvite": apiCreateInvite(context); break; //Get
-                    case "/api/guild/listInvites": apiListInvites(context); break; //Get
+                    case "/api/guild/invite/create": apiCreateInvite(context); break; //Get
+                    case "/api/guild/invite/list": apiListInvites(context); break; //Get
                     case "/api/guild/join": apiJoinGuildFromCode(context); break; //Post
                     case "/api/account/create": apiCreateUser(context); break; //Post
                     case "/api/account/login": apiLogin(context); break; //Post
@@ -61,6 +64,8 @@ class MessageServer
                     case "/api/guild/key/request": apiRequestKeys(context); break; //Post
                     case "/api/guild/key/listRequests": apiGetKeyRequests(context); break; //Get
                     case "/api/guild/key/submit": apiSubmitKey(context); break; //Post
+                    //case "/api/guild/users/setPerms": apiSetUserPerms(context); break; //Post
+                    case "/api/guild/users/list": apiListGuildUsers(context); break; //Get
                     default:
                     {
                         var responseJson = new
@@ -333,20 +338,7 @@ class MessageServer
                 sendResponse(context, typeJson, code, responseMessage);
                 return;
             }
-
-            int i = 0;
-            responseMessage += "[";
-            foreach (Message message in messages) // Assembles the messages into JSON
-            {
-                string messageJson = JsonConvert.SerializeObject(message);
-                responseMessage += messageJson;
-                if (i < messages.Count - 1)
-                {
-                    responseMessage += ", ";
-                }
-                i++;
-            }
-            responseMessage += "]"; 
+            responseMessage = JsonConvert.SerializeObject(messages);
             code = 200;
         }
 
@@ -421,6 +413,61 @@ class MessageServer
         }
         sendResponse(context, typeJson, code, responseMessage);
     }
+    private static void apiListGuildUsers(HttpListenerContext context)
+    {
+        string? token = context.Request.QueryString["token"];
+        string? guildID = context.Request.QueryString["guildID"];
+        string responseMessage;
+        int code;
+        if (string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code);
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else
+        {
+            string requesterUserID = getUserIDFromToken(token);
+            if (checkUserGuildPerms(guildID, requesterUserID) > notInGuild) // Has to have read permissions
+            {
+                List<string> users = new List<string>{ };
+                using (var con = new SQLiteConnection(connectionString))
+                using (var cmd = new SQLiteCommand(con))
+                {
+                    con.Open();
+                    cmd.CommandText = @"SELECT UserID
+                                        FROM tblGuildConnections
+                                        WHERE GuildID = @GuildID;";
+                    cmd.Parameters.AddWithValue("GuildID", guildID);
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            users.Add(reader.GetString(0));
+                        }
+                    }
+                }
+                Dictionary<string, object> responseJson = new();
+                foreach (string userID in users)
+                {
+                    int permissions = checkUserGuildPerms(guildID, userID);
+                    User user = getUserInfoFromID(userID);
+                    responseJson.Add(
+                        userID,
+                        new {
+                             permissions = permissions,
+                             userName = user.Name
+                         }
+                    );
+                }
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 200;
+            }
+            else
+            {
+                var responseJson = new { error = "You do not have permission to read messages in this channel", errcode = "FORBIDDEN" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 403;
+            }
+        }
+        sendResponse(context, typeJson, code, responseMessage);
+    }    
     private static int checkUserGuildPerms(string guildID, string userID)
     {
         /* Returns:
@@ -544,15 +591,15 @@ class MessageServer
         {
             User user = getUserInfoFromID(requestedUserID);
             if (user == null)
-                    {
-                        var responseJson = new { error = "That UserID does not exist", errcode = "NOT_FOUND" };
-                        responseMessage = JsonConvert.SerializeObject(responseJson);
-                        code = 400;
-                    }
-                    else
-                    {
-                        responseMessage = JsonConvert.SerializeObject(user);
-                        code = 200;
+            {
+                var responseJson = new { error = "That UserID does not exist", errcode = "NOT_FOUND" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 400;
+            }
+            else
+            {
+                responseMessage = JsonConvert.SerializeObject(user);
+                code = 200;
             }
         }
         sendResponse(context, typeJson, code, responseMessage);
