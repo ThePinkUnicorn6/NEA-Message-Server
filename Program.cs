@@ -64,7 +64,7 @@ class MessageServer
                     case "/api/guild/key/request": apiRequestKeys(context); break; //Post
                     case "/api/guild/key/listRequests": apiGetKeyRequests(context); break; //Get
                     case "/api/guild/key/submit": apiSubmitKey(context); break; //Post
-                    //case "/api/guild/users/setPerms": apiSetUserPerms(context); break; //Post
+                    case "/api/guild/users/togglePerms": apiToggleUserPerms(context); break; //Post
                     case "/api/guild/users/list": apiListGuildUsers(context); break; //Get
                     default:
                     {
@@ -1227,6 +1227,10 @@ class MessageServer
         }
         sendResponse(context, typeJson, code, responseMessage);
     }
+    static void apiToggleUserPerms(HttpListenerContext context)
+    {
+
+    }
     static void apiRequestKeys(HttpListenerContext context)
     {
         string? token;
@@ -1248,6 +1252,12 @@ class MessageServer
         }
         if (string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code);
         else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else if (!checkGuildExists(guildID))
+        {
+            var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 400;
+        }
         else
         {
             string userID = getUserIDFromToken(token);
@@ -1408,6 +1418,12 @@ class MessageServer
         if (string.IsNullOrEmpty(token) | string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(requesterID) | string.IsNullOrEmpty(keyCypherText))
             { returnMissingParameterError(out responseMessage, out code); }
         else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else if (!checkGuildExists(guildID))
+        {
+            var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 400;
+        }
         else
         {
             string userID = getUserIDFromToken(token);
