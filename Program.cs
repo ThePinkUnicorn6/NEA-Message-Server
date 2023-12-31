@@ -5,6 +5,7 @@ using System.Data.SQLite;
 using System.Data;
 using System.Security;
 using System.Dynamic;
+using System.Net.Mime;
 
 class MessageServer
 {
@@ -12,7 +13,7 @@ class MessageServer
     const string typeJson = "application/json"; // For ease of use when sending a response.
     static readonly string logPath = @"logs\Server_" + DateTime.Now.ToString("yyyy-MM-dd_HH.mm.ss") + ".log"; // Cannot use a const because the time can't be calculated at compilation.
     const string connectionString = "Data Source=data.db; Version=3; New=True; Compress=True;";
-    const bool logAllRequests = false;
+    const bool logAllRequests = true;
     const int owner = 5;
     const int admin = 4;
     const int unprivileged = 3;    
@@ -121,7 +122,8 @@ class MessageServer
                 'TimeSent'      REAL,
                 'MessageID'     CHAR(36),
                 'UserID'        CHAR(36),
-                'MessageText'   TEXT,
+                'Type'          INTEGER,
+                'MessageContent'   TEXT,
                 'IV'            CHAR(32),
                 FOREIGN KEY('UserID') REFERENCES 'tblUsers'('UserID'),
                 FOREIGN KEY('ChannelID') REFERENCES 'tblChannels'('ChannelID'),
@@ -239,17 +241,28 @@ class MessageServer
     }
     static dynamic parsePost(HttpListenerContext context)
     {
-        string jsonBody;
-        dynamic jsonBodyObject;
+        string bodyContent;
+
         var request = context.Request;
-        if (request.HttpMethod == "POST" && request.ContentType != null && request.ContentType.Contains(typeJson))
+        if (request.HttpMethod == "POST" && request.ContentType != null)
         {
             using (var body = request.InputStream)
             using (var reader = new StreamReader(body, request.ContentEncoding))
             {
-                jsonBody = reader.ReadToEnd();
+                bodyContent = reader.ReadToEnd();
             }
-            jsonBodyObject = JsonConvert.DeserializeObject<dynamic>(jsonBody);
+        }
+        else { bodyContent = null; }
+        return bodyContent;
+    }
+    static dynamic parseJsonPost(HttpListenerContext context)
+    {
+        var request = context.Request;
+        dynamic jsonBodyObject;
+        if (request.HttpMethod == "POST" && request.ContentType != null && request.ContentType.Contains(typeJson))
+        {
+            var JsonBody = parsePost(context);
+            jsonBodyObject = JsonConvert.DeserializeObject<dynamic>(JsonBody);
         }
         else { jsonBodyObject = null; }
         return jsonBodyObject;
@@ -288,7 +301,7 @@ class MessageServer
                     // Will return all messages in a channel if AfterMessageID is null, otherwise it will return only the messages after the message specified.
                     cmd.CommandText = @"SELECT * FROM
                                         (
-                                            SELECT tblUsers.UserID, UserName, MessageID, TimeSent, MessageText, IV
+                                            SELECT tblUsers.UserID, UserName, MessageID, TimeSent, MessageContent, IV, Type
                                             FROM tblMessages, tblUsers
                                             WHERE tblMessages.ChannelID = @ChannelID
                                             AND tblMessages.UserID = tblUsers.UserID
@@ -322,8 +335,9 @@ class MessageServer
                                 ID = reader.GetString(2),
                                 ChannelID = channelID,
                                 Time = reader.GetDouble(3),
-                                Text = reader.GetString(4),
+                                Content = reader.GetString(4),
                                 IV = reader.GetString(5),
+                                Type = reader.GetInt32(6)
                             };
                             messages.Add(responseRow);
                         }
@@ -348,7 +362,7 @@ class MessageServer
     {
         Message message;
         string token;
-        dynamic jsonBodyObject = parsePost(context);
+        dynamic jsonBodyObject = parseJsonPost(context);
         int code;
         string? responseMessage;
         if (jsonBodyObject == null)
@@ -365,11 +379,12 @@ class MessageServer
             {
                 ID = Guid.NewGuid().ToString(),
                 ChannelID = jsonBodyObject.channelID,
-                Text = jsonBodyObject.messageText,
+                Type = jsonBodyObject.type,
+                Content = jsonBodyObject.content,
                 IV = jsonBodyObject.iv,
             };
         }
-        if (string.IsNullOrEmpty(message.ChannelID) | string.IsNullOrEmpty(message.Text) | string.IsNullOrEmpty(token)) 
+        if (string.IsNullOrEmpty(message.ChannelID) | string.IsNullOrEmpty(message.Content) | string.IsNullOrEmpty(token)) 
             {returnMissingParameterError(out responseMessage, out code);}
         else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else
@@ -381,12 +396,13 @@ class MessageServer
                 using (var cmd = new SQLiteCommand(con))
                 {
                     con.Open();
-                    cmd.CommandText = @"INSERT INTO tblMessages (ChannelID, TimeSent, MessageID, UserID, MessageText, IV)
-                                        VALUES (@ChannelID, unixepoch('subsec'), @MessageID, @UserID, @MessageText, @IV);";
+                    cmd.CommandText = @"INSERT INTO tblMessages (ChannelID, TimeSent, MessageID, UserID, Type, MessageContent, IV)
+                                        VALUES (@ChannelID, unixepoch('subsec'), @MessageID, @UserID, @Type, @MessageContent, @IV);";
                     cmd.Parameters.AddWithValue("ChannelID", message.ChannelID);
                     cmd.Parameters.AddWithValue("MessageID", message.ID);
                     cmd.Parameters.AddWithValue("UserID", message.UserID);
-                    cmd.Parameters.AddWithValue("MessageText", message.Text);
+                    cmd.Parameters.AddWithValue("Type", message.Type);
+                    cmd.Parameters.AddWithValue("MessageContent", message.Content);
                     cmd.Parameters.AddWithValue("IV", message.IV);
                     cmd.ExecuteNonQuery();
                     cmd.CommandText = @"SELECT Username
@@ -398,7 +414,7 @@ class MessageServer
                                         FROM tblMessages
                                         WHERE MessageID = @MessageID";
                     cmd.Parameters.AddWithValue("MessageID", message.ID);
-                    message.Time = (Double)cmd.ExecuteScalar();
+                    message.Time = (double)cmd.ExecuteScalar();
 
                     responseMessage = JsonConvert.SerializeObject(message);
                     code = 200;
@@ -611,7 +627,7 @@ class MessageServer
         string? userName;
         string? passHash;
         string? publicKey;
-        dynamic jsonBodyObject = parsePost(context);
+        dynamic jsonBodyObject = parseJsonPost(context);
         if (jsonBodyObject == null)
         {
             var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
@@ -672,7 +688,7 @@ class MessageServer
         int code;
         string? userName;
         string? passHash;
-        dynamic jsonBodyObject = parsePost(context);
+        dynamic jsonBodyObject = parseJsonPost(context);
         if (jsonBodyObject == null)
         {
             var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
@@ -724,7 +740,7 @@ class MessageServer
         string? userID2;
         string? responseMessage;
         int? channelType;
-        dynamic jsonBodyObject = parsePost(context);
+        dynamic jsonBodyObject = parseJsonPost(context);
         if (jsonBodyObject == null)
         {
             var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
@@ -840,7 +856,7 @@ class MessageServer
         string? token;
         string? guildName;
         string? guildDesc;
-        dynamic jsonBodyObject = parsePost(context);
+        dynamic jsonBodyObject = parseJsonPost(context);
         if (jsonBodyObject == null)
         {
             var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
@@ -983,7 +999,7 @@ class MessageServer
         string? guildID;
         string? guildName;
         string? guildDesc;
-        dynamic jsonBodyObject = parsePost(context);
+        dynamic jsonBodyObject = parseJsonPost(context);
         string responseMessage;
         int code;
         if (jsonBodyObject == null)
@@ -1051,7 +1067,7 @@ class MessageServer
     {
         string? guildID;
         string? token;
-        dynamic jsonBodyObject = parsePost(context);
+        dynamic jsonBodyObject = parseJsonPost(context);
         int code;
         string? responseMessage;
         if (jsonBodyObject == null)
@@ -1178,7 +1194,7 @@ class MessageServer
     {
         string? inviteCode;
         string? token;
-        dynamic jsonBodyObject = parsePost(context);
+        dynamic jsonBodyObject = parseJsonPost(context);
         int code;
         string? responseMessage;
         if (jsonBodyObject == null)
@@ -1227,15 +1243,68 @@ class MessageServer
         }
         sendResponse(context, typeJson, code, responseMessage);
     }
-    static void apiToggleUserPerms(HttpListenerContext context)
+    static void apiToggleUserPerms(HttpListenerContext context) // Sets a users permissions to be admin if they are a normal user and vice versa
     {
-
+        string? token;
+        string? guildID;
+        string? targetUserID;
+        dynamic jsonBodyObject = parseJsonPost(context);
+        int code;
+        string? responseMessage;
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            guildID = jsonBodyObject.guildID;
+            targetUserID = jsonBodyObject.userID;
+        }
+        if (string.IsNullOrEmpty(token) | string.IsNullOrEmpty(guildID) | string.IsNullOrEmpty(targetUserID)) returnMissingParameterError(out responseMessage, out code);
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else if (!checkGuildExists(guildID))
+        {
+            var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            code = 400;
+        }
+        else
+        {
+            string userID = getUserIDFromToken(token);
+            if (checkUserGuildPerms(guildID, userID) < admin)
+            {
+                var responseJson = new { error = "You do not have permission to change user permissions in this guild", errcode = "FORBIDDEN" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 403;
+            }
+            else
+            {
+                using (var con = new SQLiteConnection(connectionString))
+                using (var cmd = new SQLiteCommand(con))
+                {
+                    con.Open();
+                    cmd.CommandText = @"UPDATE tblGuildConnections
+                                        SET Admin = 1 - Admin
+                                        WHERE GuildID = @GuildID AND UserID = @UserID";
+                    cmd.Parameters.AddWithValue("GuildID", guildID);
+                    cmd.Parameters.AddWithValue("UserID", userID);
+                    cmd.ExecuteNonQuery();
+                }
+                responseMessage = null;
+                code = 200;
+            }
+        }
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static void apiRequestKeys(HttpListenerContext context)
     {
         string? token;
         string? guildID;
-        dynamic jsonBodyObject = parsePost(context);
+        dynamic jsonBodyObject = parseJsonPost(context);
         int code;
         string? responseMessage;
         if (jsonBodyObject == null)
@@ -1250,7 +1319,7 @@ class MessageServer
             token = jsonBodyObject.token;
             guildID = jsonBodyObject.guildID;
         }
-        if (string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code);
+        if (string.IsNullOrEmpty(token) | string.IsNullOrEmpty(guildID)) returnMissingParameterError(out responseMessage, out code);
         else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else if (!checkGuildExists(guildID))
         {
@@ -1398,7 +1467,7 @@ class MessageServer
         string? guildID;
         string? keyCypherText;
         string? requesterID;
-        dynamic jsonBodyObject = parsePost(context);
+        dynamic jsonBodyObject = parseJsonPost(context);
         int code;
         string? responseMessage;
         if (jsonBodyObject == null)
@@ -1511,7 +1580,7 @@ class MessageServer
         else
         {
             userID = getUserIDFromToken(token);
-            var responseJson = new { UserID = userID };
+            var responseJson = new { userID = userID };
             responseMessage = JsonConvert.SerializeObject(responseJson);
             code = 200;
         }
@@ -1536,7 +1605,7 @@ class MessageServer
     }
     static User getUserInfoFromID(string userID)
     {
-        User user;
+        User user = new User();
         using (var con = new SQLiteConnection(connectionString))
         using (var cmd = new SQLiteCommand(con))
         {
@@ -1558,10 +1627,6 @@ class MessageServer
                         Description = description,
                         PublicKey = reader.GetString(4),
                     };
-                }
-                else 
-                {
-                    user = new User();
                 }
             }
         }

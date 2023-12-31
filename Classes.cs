@@ -4,11 +4,12 @@ using Newtonsoft.Json;
 class Message
 {
     public string ID {get; set;}
+    public int Type {get; set;}
     public string ChannelID {get; set;}
     public string UserID {get; set;}
     public string UserName {get; set;}
     public double Time {get; set;}
-    public string Text {get; set;}
+    public string Content {get; set;}
     public string IV {get; set;}
 }
 class Guild
@@ -32,6 +33,6 @@ class User
     public string Name {get; set;}
     public string ID {get; set;}
     public string Description {get; set;}
-    public string Picture {get; set;}
+    public string Picture {get; set;}  
     public string PublicKey {get; set;}
 }
