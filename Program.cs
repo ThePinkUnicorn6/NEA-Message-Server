@@ -62,6 +62,7 @@ class MessageServer
                     case "/api/account/create": apiCreateUser(context); break; //Post
                     case "/api/account/login": apiLogin(context); break; //Post
                     case "/api/account/userID": apiReturnUserIDFromToken(context); break; //Get
+                    case "/api/account/setPicture": apiSetPicture(context); break; //Post
                     case "/api/guild/key/request": apiRequestKeys(context); break; //Post
                     case "/api/guild/key/listRequests": apiGetKeyRequests(context); break; //Get
                     case "/api/guild/key/submit": apiSubmitKey(context); break; //Post
@@ -681,6 +682,24 @@ class MessageServer
             }
         }
         sendResponse(context, typeJson, code, responseMessage);
+    }
+    static void apiSetPicture(HttpListenerContext context)
+    {
+        string responseMessage;
+        int code;
+        string? token;
+        dynamic jsonBodyObject = parseJsonPost(context);
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+        }
     }
     static void apiLogin(HttpListenerContext context) // Checks if the supplied username and password are correct, and returns a token if they are
     {
