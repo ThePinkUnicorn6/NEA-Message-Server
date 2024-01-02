@@ -19,6 +19,7 @@ class Guild
     public string OwnerID {get; set;}
     public string Description {get; set;}
     public List<Channel> Channels {get; set;}
+    public string KeyDigest {get; set;}
 }
 class Channel
 {
