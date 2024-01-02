@@ -55,6 +55,7 @@ class MessageServer
                     case "/api/guild/createChannel": apiCreateChannel(context, false); break; //Post
                     case "/api/guild/create": apiCreateGuild(context); break; //Post
                     case "/api/guild/listGuilds": apiListGuilds(context); break; //Get
+                    case "/api/guild/fetchDetails": apiFetchGuildDetails(context); break; //Get
                     case "/api/guild/setDetails": apiSetGuildDetails(context); break; //Post
                     case "/api/guild/invite/create": apiCreateInvite(context); break; //Get
                     case "/api/guild/invite/list": apiListInvites(context); break; //Get
@@ -945,13 +946,14 @@ class MessageServer
             using (var cmd = new SQLiteCommand(con))
             {
                 con.Open();
-                cmd.CommandText = @"SELECT tblGuilds.GuildID, GuildName, OwnerID, GuildDesc, GuildKeyDigest, ChannelID, ChannelName, ChannelType, ChannelDesc
-                FROM tblGuilds, tblGuildConnections, tblChannels, tblUsers
-                WHERE tblUsers.UserID = @UserID 
-                AND tblUsers.UserID = tblGuildConnections.UserID
-                AND tblGuildConnections.GuildID = tblGuilds.GuildID
-                And tblGuilds.GuildID = tblChannels.GuildID
-                ORDER BY GuildName ASC;";
+                cmd.CommandText = 
+                @"  SELECT tblGuilds.GuildID, GuildName, OwnerID, GuildDesc, GuildKeyDigest, ChannelID, ChannelName, ChannelType, ChannelDesc
+                    FROM tblGuilds, tblGuildConnections, tblChannels, tblUsers
+                    WHERE tblUsers.UserID = @UserID 
+                    AND tblUsers.UserID = tblGuildConnections.UserID
+                    AND tblGuildConnections.GuildID = tblGuilds.GuildID
+                    And tblGuilds.GuildID = tblChannels.GuildID
+                    ORDER BY GuildName ASC;";
                 cmd.Parameters.AddWithValue("UserID", userID);
                 using (SQLiteDataReader reader = cmd.ExecuteReader())
                 {
@@ -1012,6 +1014,57 @@ class MessageServer
         }
         sendResponse(context, typeJson, code, responseMessage);
     }
+    static void apiFetchGuildDetails(HttpListenerContext context)
+    {
+        string? token = context.Request.QueryString["token"];
+        string? guildID = context.Request.QueryString["guildID"];
+        Guild guild = new();
+        string responseMessage;
+        int code = 500;
+        if (string.IsNullOrEmpty(token) | string.IsNullOrEmpty(guildID)) returnMissingParameterError(out responseMessage, out code); 
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else 
+        {
+            string userID = getUserIDFromToken(token);
+            if (checkUserGuildPerms(guildID, userID) < unprivileged) // Have to have admin permissions to create an invite 
+            {
+                var responseJson = new { error = "You are not in this guild", errcode = "FORBIDDEN" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 403;
+            }
+            else
+            {
+                using (var con = new SQLiteConnection(connectionString)) 
+                using (var cmd = new SQLiteCommand(con))
+                {
+                    con.Open();
+                    cmd.CommandText = 
+                    @"  SELECT GuildID, GuildName, OwnerID, GuildDesc, GuildKeyDigest
+                        FROM tblGuilds
+                        WHERE GuildID = @GuildID;";
+                    cmd.Parameters.AddWithValue("GuildID", guildID);
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            string guildDesc = reader[3] == null ? null : reader[3].ToString();
+                            guild = new Guild
+                            {
+                                ID = reader.GetString(0),
+                                Name = reader.GetString(1),
+                                OwnerID = reader.GetString(2),
+                                Description = guildDesc,
+                                KeyDigest = reader.GetString(4)
+                            };
+                            code = 200;
+                        }
+                    }
+                }
+            }
+            responseMessage = JsonConvert.SerializeObject(guild);
+            sendResponse(context, typeJson, code, responseMessage);
+        }
+    }
     static void apiSetGuildDetails(HttpListenerContext context)
     {
         string? token;
@@ -1053,8 +1106,8 @@ class MessageServer
                 if (!string.IsNullOrEmpty(guildName) & !string.IsNullOrEmpty(guildDesc))
                 {
                     cmd.CommandText = @"UPDATE tblGuilds
-                    SET GuildName = @GuildName, GuildDesc = @GuildDesc
-                    WHERE GuildID = @GuildID;";
+                                        SET GuildName = @GuildName, GuildDesc = @GuildDesc
+                                        WHERE GuildID = @GuildID;";
                     cmd.Parameters.AddWithValue("GuildName", guildName);
                     cmd.Parameters.AddWithValue("GuildID", guildID);
                     cmd.Parameters.AddWithValue("GuildDesc", guildDesc);
@@ -1062,16 +1115,16 @@ class MessageServer
                 else if (string.IsNullOrEmpty(guildName) & !string.IsNullOrEmpty(guildDesc))
                 {
                     cmd.CommandText = @"UPDATE tblGuilds
-                    SET GuildDesc = @GuildDesc
-                    WHERE GuildID = @GuildID;";
+                                        SET GuildDesc = @GuildDesc
+                                        WHERE GuildID = @GuildID;";
                     cmd.Parameters.AddWithValue("GuildID", guildID);
                     cmd.Parameters.AddWithValue("GuildDesc", guildDesc);
                 }
                 else if (!string.IsNullOrEmpty(guildName) & string.IsNullOrEmpty(guildDesc))
                 {
                     cmd.CommandText = @"UPDATE tblGuilds
-                    SET GuildName = @GuildName
-                    WHERE GuildID = @GuildID;";
+                                        SET GuildName = @GuildName
+                                        WHERE GuildID = @GuildID;";
                     cmd.Parameters.AddWithValue("GuildID", guildID);
                     cmd.Parameters.AddWithValue("GuildName", guildName);
                 }
