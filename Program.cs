@@ -6,6 +6,7 @@ using System.Data;
 using System.Security;
 using System.Dynamic;
 using System.Net.Mime;
+using System.Windows.Markup;
 
 class MessageServer
 {
@@ -31,7 +32,7 @@ class MessageServer
             log("DEBUG", "Using SQLite version: " + con.ServerVersion);
         }
         createDB(connectionString);
-        const string url = "http://+:8080/"; // Sets up http server
+        const string url = "http://localhost:8080/"; // Sets up http server
         // TODO: log and give error if port is already in use.
         HttpListener listener = new HttpListener();
         listener.Prefixes.Add(url);
@@ -377,6 +378,12 @@ class MessageServer
         else
         {
             token = jsonBodyObject.token;
+        }
+        if (string.IsNullOrEmpty((string)jsonBodyObject.channelID) | string.IsNullOrEmpty((string)jsonBodyObject.content) | string.IsNullOrEmpty(token)) //TODO: check for message type
+            {returnMissingParameterError(out responseMessage, out code);}
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else
+        {
             message = new Message
             {
                 ID = Guid.NewGuid().ToString(),
@@ -385,12 +392,6 @@ class MessageServer
                 Content = jsonBodyObject.content,
                 IV = jsonBodyObject.iv,
             };
-        }
-        if (string.IsNullOrEmpty(message.ChannelID) | string.IsNullOrEmpty(message.Content) | string.IsNullOrEmpty(token)) 
-            {returnMissingParameterError(out responseMessage, out code);}
-        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
-        else
-        {
             message.UserID = getUserIDFromToken(token);
             if (checkUserChannelPerms(message.ChannelID, message.UserID) > readOnly) // Has to have higher privilages than read only
             {
@@ -670,7 +671,7 @@ class MessageServer
                 {
                     string userID = Guid.NewGuid().ToString();
                     cmd.CommandText = @"INSERT INTO tblUsers (UserID, UserName, PassHash, PublicKey, Picture)
-                                        VALUES (@UserID, @UserName, @PassHash, @PublicKey, 'default')";
+                                        VALUES (@UserID, @UserName, @PassHash, @PublicKey, '')";
                     cmd.Parameters.AddWithValue("UserID", userID);
                     cmd.Parameters.AddWithValue("UserName", userName);
                     cmd.Parameters.AddWithValue("PassHash", passHash);
@@ -679,7 +680,7 @@ class MessageServer
                     var responseJson = new { token = createToken(userID) };
                     responseMessage = JsonConvert.SerializeObject(responseJson);
                     code = 200;
-                }  
+                }
             }
         }
         sendResponse(context, typeJson, code, responseMessage);
@@ -689,6 +690,7 @@ class MessageServer
         string responseMessage;
         int code;
         string? token;
+        string? imageBase64;
         dynamic jsonBodyObject = parseJsonPost(context);
         if (jsonBodyObject == null)
         {
@@ -700,7 +702,28 @@ class MessageServer
         else
         {
             token = jsonBodyObject.token;
+            imageBase64 = jsonBodyObject.image;
         }
+        if (string.IsNullOrEmpty(imageBase64)) returnMissingParameterError(out responseMessage, out code);
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else
+        {
+            string userID = getUserIDFromToken(token);
+            using (var con = new SQLiteConnection(connectionString))
+            using (var cmd = new SQLiteCommand(con))
+            {
+                con.Open();
+                cmd.CommandText = @"UPDATE tblUsers
+                                    SET Picture = @Picture
+                                    WHERE UserID = @UserID";
+                cmd.Parameters.AddWithValue("UserID", userID);
+                cmd.Parameters.AddWithValue("Picture", imageBase64);
+                cmd.ExecuteNonQuery();
+                code = 200;
+                responseMessage = null;
+            }
+        }
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static void apiLogin(HttpListenerContext context) // Checks if the supplied username and password are correct, and returns a token if they are
     {
@@ -740,7 +763,7 @@ class MessageServer
                 {
                     var responseJson = new { token = createToken(userID) };
                     responseMessage = JsonConvert.SerializeObject(responseJson);
-                    code = 200;  
+                    code = 200;
                 }
                 else
                 {
@@ -809,18 +832,25 @@ class MessageServer
             }
             else
             {
-                bool guildExists = checkGuildExists(guildID);
-                if (guildExists)
-                {
-                    createChannel(channelName, guildID, (int)channelType);
-                    responseMessage = null;
-                    code = 200;
-                }
-                else
+                
+                int userPermission = checkUserGuildPerms(userID1, guildID);
+                if (userPermission <= guildNotExist)
                 {
                     var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
                     responseMessage = JsonConvert.SerializeObject(responseJson);
                     code = 400;
+                }
+                else if (userPermission < admin) // Reject the request if the user has lower permissions than admin
+                {
+                    var responseJson = new { error = "You do not have permissions to carry out this action", errcode = "FORBIDDEN" };
+                    responseMessage = JsonConvert.SerializeObject(responseJson);
+                    code = 403;
+                }
+                else
+                {
+                    createChannel(channelName, guildID, (int)channelType);
+                    responseMessage = null;
+                    code = 200;
                 }
             }
         }
