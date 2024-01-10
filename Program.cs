@@ -286,9 +286,10 @@ class MessageServer
     {
         List<Message> messages = new List<Message>();
         int code;
-        string responseMessage = "";
+        string responseMessage;
         string? channelID = context.Request.QueryString["channelID"];
         string? afterMessageID = context.Request.QueryString["afterMessageID"];
+        string? beforeMessageID = context.Request.QueryString["beforeMessageID"];
         string? token = context.Request.QueryString["token"];
         if (string.IsNullOrEmpty(channelID) | string.IsNullOrEmpty(token)) returnMissingParameterError(out responseMessage, out code);
         else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
@@ -315,7 +316,12 @@ class MessageServer
                                                         FROM tblMessages
                                                         WHERE MessageID = @AfterMessageID
                                                     )
-                                                    OR @AfterMessageID IS NULL
+                                                    OR @BeforeMessageID IS NOT NULL AND tblMessages.TimeSent < (
+                                                        SELECT TimeSent
+                                                        FROM tblMessages
+                                                        WHERE MessageID = @BeforeMessageID
+                                                    )
+                                                    OR (@AfterMessageID IS NULL AND @BeforeMessageID IS NULL)
                                                     THEN true
                                                     ELSE false
                                                 END
@@ -325,6 +331,7 @@ class MessageServer
                                         )
                                         ORDER BY TimeSent ASC;"; 
                     cmd.Parameters.AddWithValue("AfterMessageID", afterMessageID);
+                    cmd.Parameters.AddWithValue("BeforeMessageID", beforeMessageID);
                     cmd.Parameters.AddWithValue("ChannelID", channelID);
                     
                     using (SQLiteDataReader reader = cmd.ExecuteReader())
