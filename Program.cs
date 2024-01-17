@@ -62,10 +62,13 @@ class MessageServer
                     case "/api/content/getMessages": apiGetMessages(context); break; //Get
                     case "/api/content/sendMessage": apiSendMessage(context); break; //Post
                     case "/api/user/getInfo": apiGetUserInfo(context); break; //Get
-                    case "/api/directMessage/create": apiCreateChannel(context, true); break; //Post
+                    //case "/api/directMessage/create": apiCreateChannel(context, true); break; //Post Unused
                     case "/api/guild/channel/create": apiCreateChannel(context, false); break; //Post
                     case "/api/guild/channel/rename": apiRenameChannel(context); break; //Post
+                    case "/api/guild/channel/delete": apiDeleteChannel(context); break; //Post
+                    case "/api/guild/channel/setPermissions": apiSetChannelPermissions(context); break;
                     case "/api/guild/create": apiCreateGuild(context); break; //Post
+                    case "/api/guild/delete": apiDeleteGuild(context); break; //Post
                     case "/api/guild/listGuilds": apiListGuilds(context); break; //Get
                     case "/api/guild/fetchDetails": apiFetchGuildDetails(context); break; //Get
                     case "/api/guild/setDetails": apiSetGuildDetails(context); break; //Post
@@ -81,6 +84,7 @@ class MessageServer
                     case "/api/guild/key/submit": apiSubmitKey(context); break; //Post
                     case "/api/guild/users/togglePerms": apiToggleUserPerms(context); break; //Post
                     case "/api/guild/users/list": apiListGuildUsers(context); break; //Get
+                    case "/api/guild/users/kick": apiKickGuildUser(context); break; //Post
                     default:
                     {
                         var responseJson = new
@@ -411,7 +415,7 @@ class MessageServer
                 IV = jsonBodyObject.iv,
             };
             message.UserID = getUserIDFromToken(token);
-            if (checkUserChannelPerms(message.ChannelID, message.UserID) > readOnly) // Has to have higher privilages than read only
+            if (checkUserChannelPerms(message.ChannelID, message.UserID) >= checkChannelMimimumPerms(message.ChannelID)) // Has to have higher privilages than the minimum
             {
                 using (var con = new SQLiteConnection(connectionString))
                 using (var cmd = new SQLiteCommand(con))
@@ -519,7 +523,7 @@ class MessageServer
         using (var cmd = new SQLiteCommand(con))
         {
             con.Open();
-            // Check if ser is in guild
+            // Check if server is in guild
             cmd.CommandText = @"SELECT EXISTS(
                                     SELECT 1 
                                     FROM tblGuildConnections
@@ -556,7 +560,8 @@ class MessageServer
     }
     private static int checkUserChannelPerms(string channelID, string userID) // Gets the permissions of the user. 0 is not in channel, 1 is a read only channel, 2 is a normal user, 3 is administrator, 4 is owner.
     {
-        /* Returns:
+        /* Used to check the permissions a user has in a guild.
+            Returns:
             - 5 for Owner
             - 4 for Admin
             - 3 if user has read and message permission
@@ -615,6 +620,46 @@ class MessageServer
                 }
             }
         }
+    }
+    private static int checkChannelMimimumPerms(string channelID)
+    {
+        /* Returns:
+            - 5 for Owner
+            - 4 for Admin
+            - 3 for Unpriviliged user
+            - 10 if channel does not exist (needs to be higher than owner to stop messages being sent)
+        */
+        int requiredPermission;
+        using (var con = new SQLiteConnection(connectionString))
+        using (var cmd = new SQLiteCommand(con))
+        {
+            // Check if channel exists
+            con.Open();
+            cmd.CommandText = @"SELECT EXISTS(
+                                        SELECT 1
+                                        FROM tblChannels
+                                        WHERE tblChannels.ChannelID = @ChannelID
+                                    );";
+            cmd.Parameters.AddWithValue("ChannelID", channelID);
+            bool channelExists = (Int64)cmd.ExecuteScalar() > 0;
+            if (!channelExists) requiredPermission = 10;
+            else
+            {
+                cmd.CommandText = @"SELECT ChannelType
+                                    FROM tblChannels
+                                    WHERE ChannelID = @ChannelID";
+                cmd.Parameters.AddWithValue("@ChannelID", channelID);
+                long channelType = (long)cmd.ExecuteScalar();
+                switch (channelType)
+                {
+                    case 1: requiredPermission = unprivileged; break;
+                    case 2: requiredPermission = admin; break;
+                    case 3: requiredPermission = owner; break;
+                    default: requiredPermission = 10; break;
+                }
+            }
+        }
+        return requiredPermission;
     }
     static void apiGetUserInfo(HttpListenerContext context)
     {
@@ -924,6 +969,72 @@ class MessageServer
                                         WHERE ChannelID = @ChannelID";
                     cmd.Parameters.AddWithValue("ChannelID", channelID);
                     cmd.Parameters.AddWithValue("ChannelName", channelName);
+                    cmd.ExecuteNonQuery();
+                }
+                responseMessage = null;
+                code = 200;
+            }
+            sendResponse(context, typeJson, code, responseMessage);
+        }
+    }
+    static void apiSetChannelPermissions(HttpListenerContext context)
+    {
+        string? channelPermissions;
+        string? channelID;
+        string? token;
+        string? responseMessage;
+        int code;
+        dynamic jsonBodyObject = parseJsonPost(context);
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            channelPermissions = jsonBodyObject.channelPermissions;
+            channelID = jsonBodyObject.channelID;
+        }
+        if (string.IsNullOrEmpty(channelPermissions) | string.IsNullOrEmpty(token)) {
+            returnMissingParameterError(out responseMessage, out code); 
+        }
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else
+        {
+            string userID1 = getUserIDFromToken(token);
+            int userPermission = checkUserChannelPerms(channelID, userID1);
+            if (userPermission <= guildNotExist)
+            {
+                var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 400;
+            }
+            else if (userPermission < admin) // Reject the request if the user has lower permissions than admin
+            {
+                var responseJson = new { error = "You do not have permissions to carry out this action", errcode = "FORBIDDEN" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 403;
+            }
+            else
+            {
+                int channelType;
+                switch (channelPermissions)
+                {
+                    case ""
+                }
+                 
+                using (var con = new SQLiteConnection(connectionString))
+                using (var cmd = new SQLiteCommand(con))
+                {
+                    con.Open();
+                    cmd.CommandText = @"UPDATE tblChannels
+                                        SET ChannelName = @ChannelName
+                                        WHERE ChannelID = @ChannelID";
+                    cmd.Parameters.AddWithValue("ChannelID", channelID);
+                    cmd.Parameters.AddWithValue("ChannelType", channelType);
                     cmd.ExecuteNonQuery();
                 }
                 responseMessage = null;
