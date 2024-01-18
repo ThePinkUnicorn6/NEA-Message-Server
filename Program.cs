@@ -33,8 +33,7 @@ class MessageServer
             log("DEBUG", "Using SQLite version: " + con.ServerVersion);
         }
         createDB(connectionString);
-        const string url = "http://+:8080/"; // Sets up http server
-        // TODO: log and give error if port is already in use.
+        const string url = "http://localhost:8080/"; // Sets up http server
         HttpListener listener = new HttpListener();
         listener.Prefixes.Add(url);
         try
@@ -43,7 +42,7 @@ class MessageServer
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Failed to start server, the port is likeley already in use");
+            Console.WriteLine("Failed to start server, the port is likeley already in use or the address has been reserved by the system.");
             log("ERROR", "Server failed to start. Error: ", ex);
             Environment.Exit(-1);
         }
@@ -62,13 +61,12 @@ class MessageServer
                     case "/api/content/getMessages": apiGetMessages(context); break; //Get
                     case "/api/content/sendMessage": apiSendMessage(context); break; //Post
                     case "/api/user/getInfo": apiGetUserInfo(context); break; //Get
-                    //case "/api/directMessage/create": apiCreateChannel(context, true); break; //Post Unused
+                    //case "/api/directMessage/create": apiCreateChannel(context, true); break; //Post Unfinished
                     case "/api/guild/channel/create": apiCreateChannel(context, false); break; //Post
                     case "/api/guild/channel/rename": apiRenameChannel(context); break; //Post
                     case "/api/guild/channel/delete": apiDeleteChannel(context); break; //Post
                     case "/api/guild/channel/setPermissions": apiSetChannelPermissions(context); break;
                     case "/api/guild/create": apiCreateGuild(context); break; //Post
-                    case "/api/guild/delete": apiDeleteGuild(context); break; //Post
                     case "/api/guild/listGuilds": apiListGuilds(context); break; //Get
                     case "/api/guild/fetchDetails": apiFetchGuildDetails(context); break; //Get
                     case "/api/guild/setDetails": apiSetGuildDetails(context); break; //Post
@@ -1044,9 +1042,9 @@ class MessageServer
         {
             string userID1 = getUserIDFromToken(token);
             int userPermission = checkUserChannelPerms(channelID, userID1);
-            if (userPermission <= guildNotExist)
+            if (userPermission <= channelNotExist)
             {
-                var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
+                var responseJson = new { error = "Invalid ChannelID", errcode = "INVALID_CHANNELID" };
                 responseMessage = JsonConvert.SerializeObject(responseJson);
                 code = 400;
             }
@@ -1072,8 +1070,65 @@ class MessageServer
                 responseMessage = null;
                 code = 200;
             }
-            sendResponse(context, typeJson, code, responseMessage);
         }
+        sendResponse(context, typeJson, code, responseMessage);
+    }
+    static  void apiDeleteChannel(HttpListenerContext context)
+    {
+        string? channelName;
+        string? channelID;
+        string? token;
+        string? responseMessage;
+        int code;
+        dynamic jsonBodyObject = parseJsonPost(context);
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            channelID = jsonBodyObject.channelID;
+        }
+        if (string.IsNullOrEmpty(channelID) | string.IsNullOrEmpty(token)) {
+            returnMissingParameterError(out responseMessage, out code); 
+        }
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else
+        {
+            string userID1 = getUserIDFromToken(token);
+            int userPermission = checkUserChannelPerms(channelID, userID1);
+            if (userPermission <= guildNotExist)
+            {
+                var responseJson = new { error = "Invalid ChannelID", errcode = "INVALID_CHANNELID" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 400;
+            }
+            else if (userPermission < admin) // Reject the request if the user has lower permissions than admin
+            {
+                var responseJson = new { error = "You do not have permissions to carry out this action", errcode = "FORBIDDEN" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 403;
+            }
+            else
+            {
+                using (var con = new SQLiteConnection(connectionString))
+                using (var cmd = new SQLiteCommand(con))
+                {
+                    con.Open();
+                    cmd.CommandText = @"DELETE FROM tblChannels
+                                        WHERE ChannelID = @ChannelID";
+                    cmd.Parameters.AddWithValue("ChannelID", channelID);
+                    cmd.ExecuteNonQuery();
+                }
+                responseMessage = null;
+                code = 200;
+            }
+        }
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static void apiSetChannelPermissions(HttpListenerContext context)
     {
@@ -1142,8 +1197,8 @@ class MessageServer
                 responseMessage = null;
                 code = 200;
             }
-            sendResponse(context, typeJson, code, responseMessage);
         }
+        sendResponse(context, typeJson, code, responseMessage);
     }
     static void createDM(string userID1, string userID2)
     {
