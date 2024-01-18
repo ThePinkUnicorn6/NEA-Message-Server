@@ -75,6 +75,7 @@ class MessageServer
                     case "/api/guild/invite/create": apiCreateInvite(context); break; //Get
                     case "/api/guild/invite/list": apiListInvites(context); break; //Get
                     case "/api/guild/join": apiJoinGuildFromCode(context); break; //Post
+                    case "/api/guild/leave": apiLeaveGuild(context); break; //Post
                     case "/api/account/create": apiCreateUser(context); break; //Post
                     case "/api/account/login": apiLogin(context); break; //Post
                     case "/api/account/userID": apiReturnUserIDFromToken(context); break; //Get
@@ -502,13 +503,110 @@ class MessageServer
             }
             else
             {
-                var responseJson = new { error = "You do not have permission to read messages in this channel", errcode = "FORBIDDEN" };
+                var responseJson = new { error = "You do not have permission to send messages in this channel", errcode = "FORBIDDEN" };
                 responseMessage = JsonConvert.SerializeObject(responseJson);
                 code = 403;
             }
         }
         sendResponse(context, typeJson, code, responseMessage);
     }    
+    private static void apiKickGuildUser(HttpListenerContext context)
+    {
+        string token;
+        string guildID;
+        string userID;
+        dynamic jsonBodyObject = parseJsonPost(context);
+        int code;
+        string? responseMessage;
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            guildID = jsonBodyObject.guildID;
+            userID = jsonBodyObject.userID;
+        }
+        if (string.IsNullOrEmpty((string)jsonBodyObject.guildID) | string.IsNullOrEmpty((string)jsonBodyObject.userID) | string.IsNullOrEmpty((string)jsonBodyObject.token)) //TODO: check for message type
+            {returnMissingParameterError(out responseMessage, out code);}
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else
+        {
+            string requesterUserID = getUserIDFromToken(token);
+            int requesterPerms = checkUserGuildPerms(guildID, requesterUserID);
+            if (requesterPerms >= admin) // Has to have admin permissions
+            {
+                removeUserFromGuild(userID, guildID);
+                responseMessage = null;
+                code = 200;
+            }
+            else
+            {
+                var responseJson = new { error = "You do not have permission to remove a user from this guild", errcode = "FORBIDDEN" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 403;
+            }
+        }
+        sendResponse(context, typeJson, code, responseMessage);
+    }
+    private static void apiLeaveGuild(HttpListenerContext context)
+    {
+        string token;
+        string guildID;
+        dynamic jsonBodyObject = parseJsonPost(context);
+        int code;
+        string? responseMessage;
+        if (jsonBodyObject == null)
+        {
+            var responseJson = new { error = "Incorrectly formatted request", errcode = "FORMATTING_ERROR"};
+            responseMessage = JsonConvert.SerializeObject(responseJson);
+            sendResponse(context, typeJson, 400, responseMessage);
+            return;
+        }
+        else
+        {
+            token = jsonBodyObject.token;
+            guildID = jsonBodyObject.guildID;
+        }
+        if (string.IsNullOrEmpty((string)jsonBodyObject.guildID) | string.IsNullOrEmpty((string)jsonBodyObject.token)) //TODO: check for message type
+            {returnMissingParameterError(out responseMessage, out code);}
+        else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
+        else
+        {
+            string userID = getUserIDFromToken(token);
+            if (checkUserGuildPerms(guildID, userID) > notInGuild) // Has to have admin permissions
+            {
+                removeUserFromGuild(userID, guildID);
+                responseMessage = null;
+                code = 200;
+            }
+            else
+            {
+                var responseJson = new { error = "You do not have permission to leave this guild", errcode = "FORBIDDEN" };
+                responseMessage = JsonConvert.SerializeObject(responseJson);
+                code = 403;
+            }
+        }
+        sendResponse(context, typeJson, code, responseMessage);
+    }
+    private static void removeUserFromGuild(string userID, string guildID)
+    {
+        using (var con = new SQLiteConnection(connectionString))
+        using (var cmd = new SQLiteCommand(con))
+        {
+            con.Open();
+            cmd.CommandText = @"DELETE FROM tblGuildConnections
+                                WHERE UserID = @UserID 
+                                AND GuildID = @GuildID";
+            cmd.Parameters.AddWithValue("GuildID", guildID);
+            cmd.Parameters.AddWithValue("UserID", userID);
+            cmd.ExecuteNonQuery();
+        }
+    }
     private static int checkUserGuildPerms(string guildID, string userID)
     {
         /* Returns:
@@ -1004,15 +1102,16 @@ class MessageServer
         else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else
         {
-            string userID1 = getUserIDFromToken(token);
-            int userPermission = checkUserChannelPerms(channelID, userID1);
+            string userID = getUserIDFromToken(token);
+            int userPermission = checkUserChannelPerms(channelID, userID);
+
             if (userPermission <= guildNotExist)
             {
                 var responseJson = new { error = "Invalid GuildID", errcode = "INVALID_GUILDID" };
                 responseMessage = JsonConvert.SerializeObject(responseJson);
                 code = 400;
             }
-            else if (userPermission < admin) // Reject the request if the user has lower permissions than admin
+            else if (userPermission < owner) // Reject the request if the user has lower permissions than admin
             {
                 var responseJson = new { error = "You do not have permissions to carry out this action", errcode = "FORBIDDEN" };
                 responseMessage = JsonConvert.SerializeObject(responseJson);
@@ -1023,7 +1122,10 @@ class MessageServer
                 int channelType;
                 switch (channelPermissions)
                 {
-                    case ""
+                    case "Owner": channelType = 3; break;
+                    case "Admin": channelType = 2; break;
+                    case "Unpriviliged": channelType = 1; break;
+                    default: channelType = 2; break;
                 }
                  
                 using (var con = new SQLiteConnection(connectionString))
@@ -1031,7 +1133,7 @@ class MessageServer
                 {
                     con.Open();
                     cmd.CommandText = @"UPDATE tblChannels
-                                        SET ChannelName = @ChannelName
+                                        SET ChannelType = @ChannelType
                                         WHERE ChannelID = @ChannelID";
                     cmd.Parameters.AddWithValue("ChannelID", channelID);
                     cmd.Parameters.AddWithValue("ChannelType", channelType);
