@@ -400,7 +400,7 @@ class MessageServer
         {
             token = jsonBodyObject.token;
         }
-        if (string.IsNullOrEmpty((string)jsonBodyObject.channelID) | string.IsNullOrEmpty((string)jsonBodyObject.content) | string.IsNullOrEmpty(token)) //TODO: check for message type
+        if (string.IsNullOrEmpty((string)jsonBodyObject.channelID) | string.IsNullOrEmpty((string)jsonBodyObject.content) | string.IsNullOrEmpty(token))
             {returnMissingParameterError(out responseMessage, out code);}
         else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else
@@ -529,7 +529,7 @@ class MessageServer
             guildID = jsonBodyObject.guildID;
             userID = jsonBodyObject.userID;
         }
-        if (string.IsNullOrEmpty((string)jsonBodyObject.guildID) | string.IsNullOrEmpty((string)jsonBodyObject.userID) | string.IsNullOrEmpty((string)jsonBodyObject.token)) //TODO: check for message type
+        if (string.IsNullOrEmpty((string)jsonBodyObject.guildID) | string.IsNullOrEmpty((string)jsonBodyObject.userID) | string.IsNullOrEmpty((string)jsonBodyObject.token))
             {returnMissingParameterError(out responseMessage, out code);}
         else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else
@@ -570,7 +570,7 @@ class MessageServer
             token = jsonBodyObject.token;
             guildID = jsonBodyObject.guildID;
         }
-        if (string.IsNullOrEmpty((string)jsonBodyObject.guildID) | string.IsNullOrEmpty((string)jsonBodyObject.token)) //TODO: check for message type
+        if (string.IsNullOrEmpty((string)jsonBodyObject.guildID) | string.IsNullOrEmpty((string)jsonBodyObject.token))
             {returnMissingParameterError(out responseMessage, out code);}
         else if (!tokenValid(token)) returnInvalidTokenError(out responseMessage, out code);
         else
@@ -1812,7 +1812,7 @@ class MessageServer
                             responseMessage = JsonConvert.SerializeObject(keys);
                             code = 200;
                             keysReturned = true;
-                        } 
+                        }
                         else // If no other users have responded the the request will return nothing
                         {
                             responseMessage = null;
@@ -1857,21 +1857,6 @@ class MessageServer
         {
             string userID = getUserIDFromToken(token);
             object[] keyRequests = checkKeyRequests(userID);
-            // Convert the keyRequests object array into json
-            // responseMessage = "[{ \"keyRequests\": [";
-            // for (int i=0; i < keyRequests.Length; i++)
-            // {
-            //     dynamic request = keyRequests[i];
-            //     responseMessage += "{";
-            //     responseMessage += "\"userID\": \"" + (string)request.UserID + "\", ";
-            //     responseMessage += "\"guildID\": \"" + (string)request.GuildID + "\"";
-            //     responseMessage += "}";
-            //     if (i + 1 != keyRequests.Length)
-            //     {
-            //         responseMessage += ", ";
-            //     }
-            // }
-            // responseMessage += "]}]";
             responseMessage = JsonConvert.SerializeObject(keyRequests);
             code = 200;
         }
@@ -1961,12 +1946,6 @@ class MessageServer
             code = 200;
         }
         sendResponse(context, typeJson, code, responseMessage);
-    }
-    static string[] getPings(string userID)
-    {
-        // TODO: Fetch ping message id's and return them as an array
-        string[] pingMessageIDs = {};
-        return pingMessageIDs;
     }
     static string createToken(string userID)// Generates a token that the client can then use to authenticate with
     {
