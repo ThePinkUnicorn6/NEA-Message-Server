@@ -220,7 +220,7 @@ class MessageServer
                 outputStream.Write(responseBytes, 0, responseBytes.Length);
                 outputStream.Close();
             }
-            if (logAllRequests)
+            if (logAllRequests && context.Request.Url.AbsolutePath.ToString() != "/api/content/getMessages")
             {
                 Console.WriteLine("Sent response: " + responseMessage);
             }
